@@ -36,6 +36,3 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
-
-# Third-party dependencies
-third_party/mujoco_menagerie/

@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'skeleton_listener = mujoco_g1_ik.skeleton_listener:main',
+            'g1_ik_controller = mujoco_g1_ik.g1_ik_controller:main',
         ],
     },
 )
