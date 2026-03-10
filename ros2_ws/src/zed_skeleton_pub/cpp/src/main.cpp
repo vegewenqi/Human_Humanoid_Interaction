@@ -22,7 +22,7 @@ static inline bool valid3D(const sl::float3 &pt);
 static inline float dist3D(const sl::float3 &a, const sl::float3 &b);
 static inline double now_sec();
 
-bool record_video = true;
+bool record_video = false;
 
 int main(int argc, char **argv)
 {
