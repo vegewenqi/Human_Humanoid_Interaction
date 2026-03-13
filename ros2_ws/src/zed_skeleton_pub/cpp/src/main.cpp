@@ -11,6 +11,7 @@
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "std_msgs/msg/u_int8.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 
 using namespace std;
 using namespace sl;
@@ -47,8 +48,8 @@ int main(int argc, char **argv)
     auto node = std::make_shared<rclcpp::Node>("zed_skeleton_pub_node");
     auto pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("/skeleton/points", 10);
     auto pub_conf  = node->create_publisher<std_msgs::msg::UInt8>("/skeleton/confidence", 10);
-    RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points and /skeleton/confidence");
-
+    auto pub_orient = node->create_publisher<std_msgs::msg::Float32MultiArray>("/skeleton/local_orientations", 10);
+    RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence, /skeleton/local_orientations");
 
     PositionalTrackingParameters positional_tracking_parameters;
     positional_tracking_parameters.set_as_static = true;
@@ -162,6 +163,20 @@ int main(int argc, char **argv)
                 // ZED SDK BodyData typically provides `confidence`
                 conf.data = static_cast<uint8_t>(std::max(0, std::min(100, (int)body.confidence)));
                 pub_conf->publish(conf);
+
+                // local orientations: flatten as [x,y,z,w, x,y,z,w, ...] for BODY_38
+                std_msgs::msg::Float32MultiArray orient_msg;
+                orient_msg.data.reserve(body.local_orientation_per_joint.size() * 4);
+
+                for (size_t i = 0; i < body.local_orientation_per_joint.size(); ++i) {
+                    const auto &q = body.local_orientation_per_joint[i];
+                    orient_msg.data.push_back(q.x);
+                    orient_msg.data.push_back(q.y);
+                    orient_msg.data.push_back(q.z);
+                    orient_msg.data.push_back(q.w);
+                }
+
+                pub_orient->publish(orient_msg);
             }
 
             // Allow ROS2 to process callbacks
@@ -325,6 +340,7 @@ static inline float dist3D(const sl::float3 &a, const sl::float3 &b)
     sl::float3 d = a - b;
     return std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 }
+
 static inline double now_sec()
 {
     using clk = std::chrono::high_resolution_clock;
