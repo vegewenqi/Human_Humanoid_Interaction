@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     InitParameters init_parameters;
     init_parameters.camera_resolution = RESOLUTION::AUTO;
     init_parameters.depth_mode = DEPTH_MODE::NEURAL;
-    init_parameters.coordinate_system = COORDINATE_SYSTEM::RIGHT_HANDED_Y_UP;
+    init_parameters.coordinate_system = COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FORWARD;
 
     parseArgs(argc, argv, init_parameters);
 
