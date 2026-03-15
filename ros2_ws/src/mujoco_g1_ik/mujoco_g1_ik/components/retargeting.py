@@ -31,6 +31,8 @@ class Retargeter:
         self.elbow_ref: Optional[np.ndarray] = None
         self.pelvis_ref: Optional[np.ndarray] = None
 
+        self._last_debug = {}
+
     def _get_filter(self, idx: int) -> EMAJumpFilter:
         if idx not in self.filters:
             self.filters[idx] = EMAJumpFilter(self.ema_alpha, self.max_jump_m)
@@ -67,15 +69,36 @@ class Retargeter:
             e_now = elbow - pelvis
             w_ref = self.wrist_ref - self.pelvis_ref
             e_ref = self.elbow_ref - self.pelvis_ref
-            dw = (w_now - w_ref) * self.cfg.motion_gain
-            de = (e_now - e_ref) * self.cfg.motion_gain
+            dw_raw = (w_now - w_ref) * self.cfg.motion_gain
+            de_raw = (e_now - e_ref) * self.cfg.motion_gain
         else:
-            dw = (wrist - self.wrist_ref) * self.cfg.motion_gain
-            de = (elbow - self.elbow_ref) * self.cfg.motion_gain
+            w_now = wrist.copy()
+            e_now = elbow.copy()
+            w_ref = self.wrist_ref.copy()
+            e_ref = self.elbow_ref.copy()
+            dw_raw = (wrist - self.wrist_ref) * self.cfg.motion_gain
+            de_raw = (elbow - self.elbow_ref) * self.cfg.motion_gain
 
-        # clamp to keep reachable & smooth
-        dw = self._clamp(dw, self.cfg.max_delta_m)
-        de = self._clamp(de, self.cfg.max_delta_m)
+        dw = self._clamp(dw_raw, self.cfg.max_delta_m)
+        de = self._clamp(de_raw, self.cfg.max_delta_m)
+
+        self._last_debug = {
+            "w_now": w_now.copy(),
+            "e_now": e_now.copy(),
+            "w_ref": w_ref.copy(),
+            "e_ref": e_ref.copy(),
+            "dw_raw": dw_raw.copy(),
+            "de_raw": de_raw.copy(),
+            "dw": dw.copy(),
+            "de": de.copy(),
+            "dw_raw_norm": float(np.linalg.norm(dw_raw)),
+            "de_raw_norm": float(np.linalg.norm(de_raw)),
+            "dw_norm": float(np.linalg.norm(dw)),
+            "de_norm": float(np.linalg.norm(de)),
+            "dw_clamped": float(np.linalg.norm(dw_raw)) > self.cfg.max_delta_m,
+            "de_clamped": float(np.linalg.norm(de_raw)) > self.cfg.max_delta_m,
+        }
+
         return dw, de
 
     @staticmethod

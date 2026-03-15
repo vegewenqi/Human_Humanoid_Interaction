@@ -51,11 +51,27 @@ class G1IKController(Node):
         self.declare_parameter("sim_dt", 1.0/60.0)
         self.declare_parameter("solver", "daqp")
 
+        self.declare_parameter("init_avg_frames", 15)
+        self.declare_parameter("init_min_conf", 85)
+
         # task weights
         self.declare_parameter("wrist_pos_cost", 1.0)
         self.declare_parameter("elbow_pos_cost", 0.35)
         self.declare_parameter("posture_cost", 0.02)
         self.declare_parameter("task_gain", 0.8)
+        self.declare_parameter("wrist_ori_cost", 0.08)
+        self.declare_parameter("posture_max_vel", 0.8)
+        self.declare_parameter("elbow_avoid_gain", 0.8)
+        self.declare_parameter("elbow_avoid_margin_y", 0.18)
+        self.declare_parameter("elbow_avoid_margin_x", 0.02)
+
+        self.declare_parameter("home_shoulder_pitch", 0.20)
+        self.declare_parameter("home_shoulder_roll", -0.35)
+        self.declare_parameter("home_shoulder_yaw", 0.10)
+        self.declare_parameter("home_elbow", 0.55)
+        self.declare_parameter("home_wrist_roll", 0.00)
+        self.declare_parameter("home_wrist_pitch", 0.00)
+        self.declare_parameter("home_wrist_yaw", 0.00)
 
         self.mjcf_path = self.get_parameter("mjcf_path").get_parameter_value().string_value
         if not self.mjcf_path:
@@ -71,6 +87,9 @@ class G1IKController(Node):
         self.ik_dt = float(self.get_parameter("ik_dt").value)
         self.sim_dt = float(self.get_parameter("sim_dt").value)
         self.solver = self.get_parameter("solver").get_parameter_value().string_value
+
+        self.init_avg_frames = int(self.get_parameter("init_avg_frames").value)
+        self.init_min_conf = int(self.get_parameter("init_min_conf").value)
 
         # retargeting config
         r_cfg = RetargetingConfig(
@@ -89,8 +108,13 @@ class G1IKController(Node):
             elbow_body=self.elbow_body,
             wrist_pos_cost=float(self.get_parameter("wrist_pos_cost").value),
             elbow_pos_cost=float(self.get_parameter("elbow_pos_cost").value),
+            wrist_ori_cost=float(self.get_parameter("wrist_ori_cost").value),
             posture_cost=float(self.get_parameter("posture_cost").value),
+            posture_max_vel=float(self.get_parameter("posture_max_vel").value),
             task_gain=float(self.get_parameter("task_gain").value),
+            elbow_avoid_gain=float(self.get_parameter("elbow_avoid_gain").value),
+            elbow_avoid_margin_y=float(self.get_parameter("elbow_avoid_margin_y").value),
+            elbow_avoid_margin_x=float(self.get_parameter("elbow_avoid_margin_x").value),
         )
         self.tasks = TaskSet(t_cfg)
 
@@ -116,22 +140,47 @@ class G1IKController(Node):
 
         # ---- DoF mask: allow only right arm ----
         self.dof_mask = np.zeros(self.model.nv, dtype=np.float64)
+
         JT = mujoco.mjtJoint
-        dof_count = {JT.mjJNT_FREE: 6, JT.mjJNT_BALL: 3, JT.mjJNT_SLIDE: 1, JT.mjJNT_HINGE: 1}
+        dof_count = {
+            JT.mjJNT_FREE: 6,
+            JT.mjJNT_BALL: 3,
+            JT.mjJNT_SLIDE: 1,
+            JT.mjJNT_HINGE: 1,
+        }
+
         allow_prefix = ("right_shoulder", "right_elbow", "right_wrist")
         allowed_joint_names = []
+
+        self.arm_dof_ids = []
+        self.arm_qpos_ids = []
+
         for j in range(self.model.njnt):
             name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)
             if name and name.startswith(allow_prefix):
                 allowed_joint_names.append(name)
-                adr = int(self.model.jnt_dofadr[j])
+
+                dof_adr = int(self.model.jnt_dofadr[j])
+                qpos_adr = int(self.model.jnt_qposadr[j])
                 n = int(dof_count[self.model.jnt_type[j]])
-                self.dof_mask[adr:adr+n] = 1.0
+
+                self.dof_mask[dof_adr:dof_adr+n] = 1.0
+
+                if n == 1:
+                    self.arm_dof_ids.append(dof_adr)
+                    self.arm_qpos_ids.append(qpos_adr)
+
+        self.arm_dof_ids = np.asarray(self.arm_dof_ids, dtype=np.int32)
+        self.arm_qpos_ids = np.asarray(self.arm_qpos_ids, dtype=np.int32)
+        self.arm_q_home = None
         self.get_logger().info(f"Allowed joints: {allowed_joint_names}")
         self.get_logger().info(f"nv={self.model.nv}, allowed dofs={int(self.dof_mask.sum())}")
 
         # refs init flags
         self._refs_inited = False
+        self._init_wrist_buf = []
+        self._init_elbow_buf = []
+        self._init_pelvis_buf = []
 
         # main loop
         self.timer = self.create_timer(1.0/60.0, self._loop)
@@ -189,17 +238,37 @@ class G1IKController(Node):
 
         # init refs once
         if not self._refs_inited:
-            q_home = self.cfg.q.copy()
-            self.tasks.initialize_refs(self.cfg, q_home=q_home)
-            self.retargeter.set_refs(wrist=wrist, elbow=elbow, pelvis=pelvis)
-            self._refs_inited = True
-            self.get_logger().info("Initialized refs (ee/elbow + wrist/elbow/pelvis).")
+            if self._try_initialize_refs(wrist=wrist, elbow=elbow, pelvis=pelvis, conf=frame.confidence):
+                ee_ref_xyz = se3_translation(self.tasks.ee_ref)
+                elbow_ref_xyz_robot = se3_translation(self.tasks.elbow_ref)
+
+                self.get_logger().info(
+                    f"[INIT] conf={frame.confidence}, "
+                    f"human_wrist_ref={np.array2string(self.retargeter.wrist_ref, precision=3)}, "
+                    f"human_elbow_ref={np.array2string(self.retargeter.elbow_ref, precision=3)}, "
+                    f"human_pelvis_ref={np.array2string(self.retargeter.pelvis_ref, precision=3) if self.retargeter.pelvis_ref is not None else 'None'}"
+                )
+                self.get_logger().info(
+                    f"[INIT] robot_ee_ref={np.array2string(ee_ref_xyz, precision=3)}, "
+                    f"robot_elbow_ref={np.array2string(elbow_ref_xyz_robot, precision=3)}"
+                )
+
+                self._render_only()
+                return
             self._render_only()
             return
 
         # retarget to deltas
         dw, de = self.retargeter.compute_delta(wrist=wrist, elbow=elbow, pelvis=pelvis)
         self.tasks.set_targets_from_deltas(dw=dw, de=de)
+
+        self.tasks._tmp_elbow_avoid_task = None
+        self.tasks.elbow_avoid_velocity(
+            cfg_obj=self.cfg,
+            model=self.model,
+            elbow_body=self.elbow_body,
+            torso_body="torso_link",
+        )
 
         # solve IK for tasks
         task_list = self.tasks.build_tasks()
@@ -208,8 +277,15 @@ class G1IKController(Node):
         except TypeError:
             vel = solve_ik(self.cfg, task_list, self.ik_dt, damping=1e-4)
 
-        # velocity damping in nv space
-        # vel = vel + self.tasks.posture_damping(self.data.qvel.copy())
+        # posture regularization
+        if self.arm_q_home is not None:
+            vel = vel + self.tasks.posture_velocity(
+                q=self.cfg.q,
+                arm_q_home=self.arm_q_home,
+                arm_qpos_ids=self.arm_qpos_ids,
+                arm_dof_ids=self.arm_dof_ids,
+                nv=self.model.nv,
+            )
 
         # freeze non-right-arm dofs
         vel = vel * self.dof_mask
@@ -220,6 +296,7 @@ class G1IKController(Node):
         # apply kinematically
         self.data.qpos[:] = self.cfg.q.copy()
         mujoco.mj_forward(self.model, self.data)
+        # mujoco.mj_step(self.model, self.data)
         if self.viewer.is_running():
             self.viewer.sync()
 
@@ -230,7 +307,42 @@ class G1IKController(Node):
             ee_now = se3_translation(self.cfg.get_transform_frame_to_world(self.ee_site, "site"))
             ee_tgt = se3_translation(SE3.from_translation(dw) @ self.tasks.ee_ref)
             ee_err = float(np.linalg.norm(ee_tgt - ee_now))
-            self.get_logger().info(f"ee_err={ee_err:.3f} m, |dw|={float(np.linalg.norm(dw)):.3f}, |de|={float(np.linalg.norm(de)):.3f}, conf={frame.confidence}")
+
+            dbg = getattr(self.retargeter, "_last_debug", {})
+
+            vel_norm_before_mask = float(np.linalg.norm(vel))
+            vel_norm_after_mask = float(np.linalg.norm(vel * self.dof_mask))
+
+            self.get_logger().info(
+                "[DBG] "
+                f"conf={frame.confidence}, "
+                f"ee_err={ee_err:.3f} m, "
+                f"|dw_raw|={dbg.get('dw_raw_norm', -1.0):.3f}, "
+                f"|de_raw|={dbg.get('de_raw_norm', -1.0):.3f}, "
+                f"|dw|={dbg.get('dw_norm', -1.0):.3f}, "
+                f"|de|={dbg.get('de_norm', -1.0):.3f}, "
+                f"dw_clamped={dbg.get('dw_clamped', False)}, "
+                f"de_clamped={dbg.get('de_clamped', False)}, "
+                f"|vel|={vel_norm_before_mask:.3f}, "
+                f"|vel_masked|={vel_norm_after_mask:.3f}"
+            )
+
+            self.get_logger().info(
+                "[DBG_VEC] "
+                f"w_now={np.array2string(dbg.get('w_now', np.zeros(3)), precision=3)}, "
+                f"e_now={np.array2string(dbg.get('e_now', np.zeros(3)), precision=3)}, "
+                f"w_ref={np.array2string(dbg.get('w_ref', np.zeros(3)), precision=3)}, "
+                f"e_ref={np.array2string(dbg.get('e_ref', np.zeros(3)), precision=3)}"
+            )
+
+            self.get_logger().info(
+                "[DBG_VEC] "
+                f"dw_raw={np.array2string(dbg.get('dw_raw', np.zeros(3)), precision=3)}, "
+                f"de_raw={np.array2string(dbg.get('de_raw', np.zeros(3)), precision=3)}, "
+                f"dw={np.array2string(dbg.get('dw', np.zeros(3)), precision=3)}, "
+                f"de={np.array2string(dbg.get('de', np.zeros(3)), precision=3)}"
+            )
+
             self._dbg_t = time.time()
 
     def _render_only(self):
@@ -238,6 +350,80 @@ class G1IKController(Node):
         if self.viewer.is_running():
             self.viewer.sync()
 
+    def _try_initialize_refs(self, wrist: np.ndarray, elbow: np.ndarray, pelvis: Optional[np.ndarray], conf: int) -> bool:
+        if conf < self.init_min_conf:
+            return False
+
+        self._init_wrist_buf.append(wrist.copy())
+        self._init_elbow_buf.append(elbow.copy())
+        if pelvis is not None:
+            self._init_pelvis_buf.append(pelvis.copy())
+
+        n = len(self._init_wrist_buf)
+        if n < self.init_avg_frames:
+            if n == 1 or n % 5 == 0:
+                self.get_logger().info(f"[INIT_BUF] collecting init samples: {n}/{self.init_avg_frames}")
+            return False
+
+        wrist_ref = np.mean(np.stack(self._init_wrist_buf, axis=0), axis=0)
+        elbow_ref = np.mean(np.stack(self._init_elbow_buf, axis=0), axis=0)
+        pelvis_ref = None
+        if self.retargeter.cfg.use_pelvis_relative:
+            pelvis_ref = np.mean(np.stack(self._init_pelvis_buf, axis=0), axis=0)
+
+        q_home = self.cfg.q.copy()
+        self.tasks.initialize_refs(self.cfg, q_home=q_home)
+        self.retargeter.set_refs(wrist=wrist_ref, elbow=elbow_ref, pelvis=pelvis_ref)
+
+        # posture regularization: nominal arm pose
+        self.arm_q_home = self._build_manual_arm_q_home()
+        self.get_logger().info(
+        f"[INIT_DONE] manual arm_q_home={np.array2string(self.arm_q_home, precision=3)}"
+    )
+
+        self._refs_inited = True
+
+        self.get_logger().info(
+            f"[INIT_DONE] averaged over {n} frames, conf>={self.init_min_conf}, "
+            f"w_ref={np.array2string(wrist_ref, precision=3)}, "
+            f"e_ref={np.array2string(elbow_ref, precision=3)}, "
+            f"p_ref={np.array2string(pelvis_ref, precision=3) if pelvis_ref is not None else 'None'}"
+        )
+        self.get_logger().info(
+            f"[INIT_DONE] arm_q_home={np.array2string(self.arm_q_home, precision=3)}"
+        )
+        return True
+
+    def _build_manual_arm_q_home(self) -> np.ndarray:
+        """
+        人工指定一个更自然的右臂 nominal pose。
+        顺序必须与 allowed joints / arm_qpos_ids 保持一致：
+        [right_shoulder_pitch_joint,
+        right_shoulder_roll_joint,
+        right_shoulder_yaw_joint,
+        right_elbow_joint,
+        right_wrist_roll_joint,
+        right_wrist_pitch_joint,
+        right_wrist_yaw_joint]
+        """
+        q_home = np.array([
+            float(self.get_parameter("home_shoulder_pitch").value),
+            float(self.get_parameter("home_shoulder_roll").value),
+            float(self.get_parameter("home_shoulder_yaw").value),
+            float(self.get_parameter("home_elbow").value),
+            float(self.get_parameter("home_wrist_roll").value),
+            float(self.get_parameter("home_wrist_pitch").value),
+            float(self.get_parameter("home_wrist_yaw").value),
+        ], dtype=np.float64)
+
+        if q_home.shape[0] != self.arm_qpos_ids.shape[0]:
+            self.get_logger().warn(
+                f"Manual arm_q_home len={q_home.shape[0]} but arm_qpos_ids len={self.arm_qpos_ids.shape[0]}, "
+                "falling back to current cfg.q"
+            )
+            return self.cfg.q[self.arm_qpos_ids].copy()
+
+        return q_home
 
 def main():
     rclpy.init()
