@@ -2,7 +2,7 @@
 # from: https://github.com/stereolabs/zed-unity/blob/master/ZEDCamera/Assets/SDK/Helpers/Scripts/BodyTracking/SkeletonHandler.cs
 
 # Common
-PELIVS = 0
+PELVIS = 0
 SPINE_1 = 1
 SPINE_2 = 2
 SPINE_3 = 3

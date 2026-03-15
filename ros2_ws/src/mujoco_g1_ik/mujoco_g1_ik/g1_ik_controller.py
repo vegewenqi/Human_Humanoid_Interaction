@@ -37,7 +37,7 @@ class G1IKController(Node):
 
         self.declare_parameter("wrist_index", zi.RIGHT_WRIST)   # 17
         self.declare_parameter("elbow_index", zi.RIGHT_ELBOW)   # 15
-        self.declare_parameter("pelvis_index", zi.PELIVS)       # 0
+        self.declare_parameter("pelvis_index", zi.PELVIS)       # 0
 
         self.declare_parameter("use_pelvis_relative", True)
         self.declare_parameter("skeleton_unit_scale", 0.001)
