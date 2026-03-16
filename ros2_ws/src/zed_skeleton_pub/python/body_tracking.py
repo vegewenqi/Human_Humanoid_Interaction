@@ -16,7 +16,7 @@ init_params.camera_resolution = sl.RESOLUTION.HD720
 init_params.camera_fps = 60
 init_params.coordinate_units = sl.UNIT.METER
 init_params.depth_mode = sl.DEPTH_MODE.NEURAL
-init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP
+init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
 
 if zed.open(init_params) != sl.ERROR_CODE.SUCCESS:
     exit(1)
