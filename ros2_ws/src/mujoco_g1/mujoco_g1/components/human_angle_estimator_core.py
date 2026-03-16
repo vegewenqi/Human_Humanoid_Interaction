@@ -166,4 +166,4 @@ class HumanAngleEstimatorCore:
         ang = angle_between(u, f)
         if ang is None:
             return None
-        return float(np.pi - ang)
+        return float(ang)
