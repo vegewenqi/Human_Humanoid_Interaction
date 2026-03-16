@@ -12,7 +12,7 @@ import mujoco.viewer
 
 class G1ActuatorController(Node):
     """
-    Actuator-driven upper-body controller for G1.
+    Fixed-base actuator-driven upper-body controller for G1.
 
     Input topic:
         /g1_upperbody_q_des   Float32MultiArray
@@ -23,10 +23,9 @@ class G1ActuatorController(Node):
         Uses MuJoCo position actuators:
             data.ctrl[actuator_ids] = q_cmd
 
-    Notes:
-        - Designed for g1_mjx.xml first.
-        - In both g1_mjx.xml and g1.xml, actuator names for these joints
-          are the same as the joint names.
+    Special behavior:
+        - base is locked every step (good for upper-body-only debugging)
+        - still uses data.ctrl + mj_step(), so this is actuator-driven, not direct qpos teleport
     """
 
     def __init__(self):
@@ -37,12 +36,15 @@ class G1ActuatorController(Node):
         self.declare_parameter("qdes_topic", "/g1_upperbody_q_des")
         self.declare_parameter("qdes_in_degrees", False)
 
-        self.declare_parameter("sim_dt", 1.0 / 250.0)   # g1_mjx.xml timestep = 0.004
+        self.declare_parameter("sim_dt", 1.0 / 250.0)
         self.declare_parameter("ctrl_dt", 1.0 / 60.0)
 
         self.declare_parameter("log_output", "both")    # qdes | q | ctrl | both
         self.declare_parameter("ema_alpha", 0.25)
         self.declare_parameter("max_rate_deg", 120.0)
+
+        # fix root/base in simulation
+        self.declare_parameter("lock_base", True)
 
         # joint names = actuator names in your XML
         self.declare_parameter(
@@ -64,13 +66,6 @@ class G1ActuatorController(Node):
         )
 
         # controller-side clipping
-        # ranges chosen to match your XML upper-body joint ranges conservatively:
-        # waist_roll   [-0.52, 0.52]
-        # waist_pitch  [-0.52, 0.52]
-        # left_sh_roll [-1.5882, 2.2515]
-        # left_elbow   [-1.0472, 2.0944]
-        # right_sh_roll[-2.2515, 1.5882]
-        # right_elbow  [-1.0472, 2.0944]
         self.declare_parameter(
             "q_min",
             [-0.52, -0.52, -1.5882, -1.0472, -2.2515, -1.0472]
@@ -97,6 +92,8 @@ class G1ActuatorController(Node):
         self.ema_alpha = float(self.get_parameter("ema_alpha").value)
         self.max_rate_deg = float(self.get_parameter("max_rate_deg").value)
         self.max_rate_rad = np.deg2rad(self.max_rate_deg)
+
+        self.lock_base = bool(self.get_parameter("lock_base").value)
 
         self.joint_names: List[str] = list(self.get_parameter("joint_names").value)
         self.q_home = np.array(self.get_parameter("q_home").value, dtype=np.float64)
@@ -126,11 +123,26 @@ class G1ActuatorController(Node):
         self.model = mujoco.MjModel.from_xml_path(self.mjcf_path)
         self.data = mujoco.MjData(self.model)
 
-        # overwrite model timestep if desired
         self.model.opt.timestep = self.sim_dt
 
         self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
         self.get_logger().info("MuJoCo viewer launched (passive).")
+
+        # detect floating base
+        self.has_free_root = self._detect_free_root()
+
+        # save initial base state for locking
+        self.base_qpos0 = None
+        if self.has_free_root:
+            self.base_qpos0 = self.data.qpos[:7].copy()
+            self.get_logger().info(
+                f"Detected free root joint. lock_base={self.lock_base}, "
+                f"base_qpos0={np.array2string(self.base_qpos0, precision=3)}"
+            )
+        else:
+            self.get_logger().info(
+                f"No free root joint detected. lock_base={self.lock_base} has no effect."
+            )
 
         # resolve joint ids / qpos ids / actuator ids
         self.joint_ids = []
@@ -166,7 +178,7 @@ class G1ActuatorController(Node):
         self.get_logger().info(f"Controlled qpos ids: {self.qpos_ids.tolist()}")
         self.get_logger().info(f"Controlled actuator ids: {self.actuator_ids.tolist()}")
 
-        # initialize a sane whole-body actuator ctrl
+        # initialize all actuators to current qpos to avoid weird targets
         self._initialize_full_ctrl()
 
         # initialize controlled joint command
@@ -175,8 +187,10 @@ class G1ActuatorController(Node):
             q0 = np.clip(self.q_home.copy(), self.q_min, self.q_max)
             self.q_cmd = q0.copy()
             self.data.ctrl[self.actuator_ids] = self.q_cmd
-            # let the actuators pull the robot toward q_home for a few steps
+
+            # let the actuators settle for a short while
             for _ in range(50):
+                self._apply_base_lock()
                 mujoco.mj_step(self.model, self.data)
         else:
             self.q_cmd = q_now.copy()
@@ -189,8 +203,24 @@ class G1ActuatorController(Node):
 
         self.get_logger().info(
             f"Started G1ActuatorController: qdes_topic={self.qdes_topic}, "
-            f"ctrl_dt={self.ctrl_dt:.4f}, sim_dt={self.sim_dt:.4f}"
+            f"ctrl_dt={self.ctrl_dt:.4f}, sim_dt={self.sim_dt:.4f}, lock_base={self.lock_base}"
         )
+
+    def _detect_free_root(self) -> bool:
+        if self.model.njnt <= 0:
+            return False
+        root_type = self.model.jnt_type[0]
+        return root_type == mujoco.mjtJoint.mjJNT_FREE
+
+    def _apply_base_lock(self):
+        if not self.lock_base:
+            return
+        if not self.has_free_root:
+            return
+
+        # lock free base pose and velocity
+        self.data.qpos[:7] = self.base_qpos0
+        self.data.qvel[:6] = 0.0
 
     def _initialize_full_ctrl(self):
         """
@@ -250,8 +280,15 @@ class G1ActuatorController(Node):
         # write only the 6 controlled actuators
         self.data.ctrl[self.actuator_ids] = self.q_cmd
 
+        # lock base before stepping
+        self._apply_base_lock()
+
         # step physics
         mujoco.mj_step(self.model, self.data)
+
+        # lock base again after stepping, for extra stability
+        self._apply_base_lock()
+        mujoco.mj_forward(self.model, self.data)
 
         if self.viewer.is_running():
             self.viewer.sync()
@@ -289,7 +326,11 @@ class G1ActuatorController(Node):
             self.last_log_t = now
 
     def _step_only(self):
+        self._apply_base_lock()
         mujoco.mj_step(self.model, self.data)
+        self._apply_base_lock()
+        mujoco.mj_forward(self.model, self.data)
+
         if self.viewer.is_running():
             self.viewer.sync()
 
