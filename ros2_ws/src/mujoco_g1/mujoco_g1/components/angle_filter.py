@@ -33,12 +33,12 @@ class AngleFilter:
         self.prev: Dict[str, float] = {}
 
         self.limits = {
-            "torso_roll": AngleLimits(np.deg2rad(-35.0), np.deg2rad(35.0)),
-            "torso_pitch": AngleLimits(np.deg2rad(-35.0), np.deg2rad(35.0)),
-            "l_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(110.0)),
-            "r_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(110.0)),
-            "l_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
-            "r_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
+            "torso_roll": AngleLimits(np.deg2rad(-60.0), np.deg2rad(60.0)),
+            "torso_pitch": AngleLimits(np.deg2rad(-60.0), np.deg2rad(60.0)),
+            "l_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
+            "r_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
+            "l_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(180.0)),
+            "r_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(180.0)),
         }
 
     def _ema(self, name: str, x: float) -> float:
