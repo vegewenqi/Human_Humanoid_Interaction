@@ -67,7 +67,8 @@ class HumanAngleEstimatorNode(Node):
         if conf >= 0 and conf < self.min_confidence:
             return
 
-        pts_xyz = pc2_to_xyz_array(msg)
+        pts_xyz = pc2_to_xyz_array(msg).astype(np.float64)
+        pts_xyz *= 0.001  # mm -> m
         if pts_xyz is None or pts_xyz.size == 0:
             return
 
