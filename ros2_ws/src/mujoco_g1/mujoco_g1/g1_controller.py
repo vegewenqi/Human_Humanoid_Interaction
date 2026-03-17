@@ -62,7 +62,7 @@ class G1ActuatorController(Node):
         # startup pose for the 6 controlled joints
         self.declare_parameter(
             "q_home",
-            [0.0, 0.0, 0.0, 0.55, 0.0, 0.55]
+            [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]
         )
 
         # controller-side clipping

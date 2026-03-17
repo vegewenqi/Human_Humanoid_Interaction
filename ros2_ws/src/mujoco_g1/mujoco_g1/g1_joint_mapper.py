@@ -48,7 +48,7 @@ class G1JointMapperNode(Node):
         # keep elbows slightly bent for a more natural initial posture
         self.declare_parameter(
             "q_home",
-            [0.0, 0.0, 0.0, 0.55, 0.0, 0.55]
+            [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]
         )
 
         # direction sign s_j
