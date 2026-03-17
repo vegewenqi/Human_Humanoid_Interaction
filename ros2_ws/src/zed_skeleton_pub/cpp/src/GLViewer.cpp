@@ -52,7 +52,7 @@ const GLchar* SK_FRAGMENT_SHADER = "#version 330 core\n"
                                    "}";
 
 void addVert(Simple3DObject& obj, float i_f, float limit, float height, sl::float4& clr) {
-    // Z-up: floor should lie on the XY plane, with constant Z = height
+    // Z-up: floor is the XY plane, so Z stays constant.
     auto p1 = sl::float3(i_f, -limit, height);
     auto p2 = sl::float3(i_f,  limit, height);
     auto p3 = sl::float3(-limit, i_f, height);
@@ -155,7 +155,12 @@ void GLViewer::init(int argc, char** argv) {
     shaderLine.MVP_Mat = glGetUniformLocation(shaderLine.it.getProgramId(), "u_mvpMatrix");
 
     // Create the camera
-    camera_ = CameraGL(sl::Translation(0, 0, 0), sl::Translation(0, 0, -100));
+    // Z-up world, X forward.
+    camera_ = CameraGL(
+        sl::Translation(0.0f, -3000.0f, 1200.0f),
+        sl::Translation(0.0f, -1.0f, 0.4f),
+        sl::Translation(0.0f, 0.0f, 1.0f)
+    );
     // camera_.setOffsetFromPosition(sl::Translation(0, 0, 1000));
 
     // Create the skeletons objects
@@ -268,14 +273,15 @@ void GLViewer::update() {
     }
 
     if (keyStates_['r'] == KEY_STATE::UP || keyStates_['R'] == KEY_STATE::UP) {
-        camera_.setPosition(sl::Translation(0.0f, -1500.0f, 1500.0f));
-        camera_.setDirection(sl::Translation(0.0f, 1.0f, -0.6f), sl::Translation(0.0f, 0.0f, 1.0f));
+        camera_.setOffsetFromPosition(sl::Translation(0.0f, 0.0f, 0.0f));
+        camera_.setPosition(sl::Translation(0.0f, -3000.0f, 1200.0f));
+        camera_.setDirection(sl::Translation(0.0f, -1.0f, 0.4f), sl::Translation(0.0f, 0.0f, 1.0f));
     }
 
     if (keyStates_['t'] == KEY_STATE::UP || keyStates_['T'] == KEY_STATE::UP) {
-        camera_.setPosition(sl::Translation(0.0f, 0.0f, 6000.0f));
         camera_.setOffsetFromPosition(sl::Translation(0.0f, 0.0f, 0.0f));
-        camera_.setDirection(sl::Translation(0.0f, 0.0f, -1.0f), sl::Translation(1.0f, 0.0f, 0.0f));
+        camera_.setPosition(sl::Translation(0.0f, 0.0f, 6000.0f));
+        camera_.setDirection(sl::Translation(0.0f, 0.0f, 1.0f), sl::Translation(1.0f, 0.0f, 0.0f));
     }
 
     // Rotate camera with mouse
@@ -812,9 +818,9 @@ bool Shader::compile(GLuint& shaderId, GLenum type, const GLchar* src) {
     return true;
 }
 
-const sl::Translation CameraGL::ORIGINAL_FORWARD = sl::Translation(1, 0, 0);   // X forward
-const sl::Translation CameraGL::ORIGINAL_UP      = sl::Translation(0, 0, 1);   // Z up
-const sl::Translation CameraGL::ORIGINAL_RIGHT   = sl::Translation(0, 1, 0);  // right axis for RH Z-up
+const sl::Translation CameraGL::ORIGINAL_FORWARD = sl::Translation(0, 1, 0);
+const sl::Translation CameraGL::ORIGINAL_UP      = sl::Translation(0, 0, 1);
+const sl::Translation CameraGL::ORIGINAL_RIGHT   = sl::Translation(1, 0, 0);
 
 CameraGL::CameraGL(sl::Translation position, sl::Translation direction, sl::Translation vertical) {
     this->position_ = position;
