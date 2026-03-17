@@ -814,7 +814,7 @@ bool Shader::compile(GLuint& shaderId, GLenum type, const GLchar* src) {
 
 const sl::Translation CameraGL::ORIGINAL_FORWARD = sl::Translation(1, 0, 0);   // X forward
 const sl::Translation CameraGL::ORIGINAL_UP      = sl::Translation(0, 0, 1);   // Z up
-const sl::Translation CameraGL::ORIGINAL_RIGHT   = sl::Translation(0, -1, 0);  // right axis for RH Z-up
+const sl::Translation CameraGL::ORIGINAL_RIGHT   = sl::Translation(0, 1, 0);  // right axis for RH Z-up
 
 CameraGL::CameraGL(sl::Translation position, sl::Translation direction, sl::Translation vertical) {
     this->position_ = position;
