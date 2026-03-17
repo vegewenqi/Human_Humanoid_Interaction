@@ -52,15 +52,43 @@ const GLchar* SK_FRAGMENT_SHADER = "#version 330 core\n"
                                    "}";
 
 void addVert(Simple3DObject& obj, float i_f, float limit, float height, sl::float4& clr) {
-    // Z-up, X-forward:
-    // floor must lie in the XY plane, with constant Z = height
-    auto p1 = sl::float3(i_f, -limit, height);
-    auto p2 = sl::float3(i_f,  limit, height);
-    auto p3 = sl::float3(-limit, i_f, height);
-    auto p4 = sl::float3( limit, i_f, height);
+    auto p1 = sl::float3(i_f, height, -limit);
+    auto p2 = sl::float3(i_f, height, limit);
+    auto p3 = sl::float3(-limit, height, i_f);
+    auto p4 = sl::float3(limit, height, i_f);
+
 
     obj.addLine(p1, p2, clr);
     obj.addLine(p3, p4, clr);
+}
+
+static inline sl::float3 convertZUpXfwdToViewerYUp(const sl::float3& p) {
+    // Input  (ROS REP-103): X forward, Y left, Z up
+    // Output (legacy GLViewer): X horizontal, Y up, Z depth
+    //
+    // Axis remap:
+    //   x_gl = y_ros
+    //   y_gl = z_ros
+    //   z_gl = x_ros
+    return sl::float3(p.y, p.z, p.x);
+}
+
+static inline sl::Transform convertZUpXfwdToViewerYUp(const sl::Transform& T_ros) {
+    // Rotation matrix C such that p_gl = C * p_ros
+    sl::Transform C;
+    C.setIdentity();
+    C(0, 0) = 0.0f; C(0, 1) = 1.0f; C(0, 2) = 0.0f;
+    C(1, 0) = 0.0f; C(1, 1) = 0.0f; C(1, 2) = 1.0f;
+    C(2, 0) = 1.0f; C(2, 1) = 0.0f; C(2, 2) = 0.0f;
+
+    // Since C is a pure rotation, C^-1 = C^T
+    sl::Transform Ct;
+    Ct.setIdentity();
+    Ct(0, 0) = 0.0f; Ct(0, 1) = 0.0f; Ct(0, 2) = 1.0f;
+    Ct(1, 0) = 1.0f; Ct(1, 1) = 0.0f; Ct(1, 2) = 0.0f;
+    Ct(2, 0) = 0.0f; Ct(2, 1) = 1.0f; Ct(2, 2) = 0.0f;
+
+    return C * T_ros * Ct;
 }
 
 GLViewer* currentInstance_ = nullptr;
@@ -156,12 +184,7 @@ void GLViewer::init(int argc, char** argv) {
     shaderLine.MVP_Mat = glGetUniformLocation(shaderLine.it.getProgramId(), "u_mvpMatrix");
 
     // Create the camera
-    // Z-up world, X forward.
-    camera_ = CameraGL(
-        sl::Translation(-2500.0f, 0.0f, 1200.0f),
-        sl::Translation(-1.0f, 0.0f, 0.35f),
-        sl::Translation(0.0f, 0.0f, 1.0f)
-    );
+    camera_ = CameraGL(sl::Translation(0, 0, 0), sl::Translation(0, 0, -100));
     // camera_.setOffsetFromPosition(sl::Translation(0, 0, 1000));
 
     // Create the skeletons objects
@@ -178,7 +201,7 @@ void GLViewer::init(int argc, char** argv) {
     sl::float4 clr_grid(80, 80, 80, 255);
     clr_grid /= 255.f;
 
-    float grid_height = 0.0f;
+    float grid_height = -3;
     for (int i = (int)(-limit); i <= (int)(limit); i++)
         addVert(floor_grid, i * 1000, limit * 1000, grid_height * 1000, clr_grid);
 
@@ -245,25 +268,43 @@ void createSKPrimitivePtOnly(sl::BodyData& body, const int idx_start, const int 
 void GLViewer::updateData(Bodies& bodies, sl::Transform& pose) {
     mtx.lock();
     skeletons.clear();
-    cam_pose = pose;
+
+    // Convert camera pose from Z-up/X-forward to the legacy Y-up viewer frame
+    cam_pose = convertZUpXfwdToViewerYUp(pose);
+
+    // Keep camera pose centered like the original sample
     sl::float3 tr_0(0, 0, 0);
     cam_pose.setTranslation(tr_0);
 
     for (auto& it : bodies.body_list) {
         if (renderObject(it, bodies.is_tracked)) {
-            // draw skeletons
             auto clr_id = generateColorID(it.id);
-            if (it.keypoint.size() == 18)
-                createSKPrimitive(it, BODY_18_BONES, skeletons, clr_id);
-            else if (it.keypoint.size() == 34) {
-                createSKPrimitive(it, BODY_34_BONES, skeletons, clr_id);
-            } else {
-                createSKPrimitive(it, BODY_BONES_FAST_RENDER, skeletons, clr_id);
-                // Draw rest of the body with kp only, and smaller (for high link density parts like hands)
-                createSKPrimitivePtOnly(it, getIdx(BODY_38_PARTS::RIGHT_WRIST) + 1, it.keypoint.size() - 1, skeletons, clr_id);
+
+            // Make a local copy and rotate all keypoints into the viewer frame
+            sl::BodyData body_view = it;
+            for (auto& kp : body_view.keypoint) {
+                if (std::isfinite(kp.norm())) {
+                    kp = convertZUpXfwdToViewerYUp(kp);
+                }
+            }
+
+            if (body_view.keypoint.size() == 18)
+                createSKPrimitive(body_view, BODY_18_BONES, skeletons, clr_id);
+            else if (body_view.keypoint.size() == 34)
+                createSKPrimitive(body_view, BODY_34_BONES, skeletons, clr_id);
+            else {
+                createSKPrimitive(body_view, BODY_BONES_FAST_RENDER, skeletons, clr_id);
+                createSKPrimitivePtOnly(
+                    body_view,
+                    getIdx(BODY_38_PARTS::RIGHT_WRIST) + 1,
+                    body_view.keypoint.size() - 1,
+                    skeletons,
+                    clr_id
+                );
             }
         }
     }
+
     mtx.unlock();
 }
 
@@ -274,16 +315,15 @@ void GLViewer::update() {
     }
 
     if (keyStates_['r'] == KEY_STATE::UP || keyStates_['R'] == KEY_STATE::UP) {
-        camera_.setOffsetFromPosition(sl::Translation(0.0f, 0.0f, 0.0f));
-        camera_.setPosition(sl::Translation(-2500.0f, 0.0f, 1200.0f));
-        camera_.setDirection(sl::Translation(-1.0f, 0.0f, 0.35f), sl::Translation(0.0f, 0.0f, 1.0f));
+        camera_.setPosition(sl::Translation(0.0f, 0.0f, 1500.0f));
+        camera_.setDirection(sl::Translation(0.0f, 0.0f, 1.0f), sl::Translation(0.0f, 1.0f, 0.0f));
     }
 
     if (keyStates_['t'] == KEY_STATE::UP || keyStates_['T'] == KEY_STATE::UP) {
-        camera_.setOffsetFromPosition(sl::Translation(0.0f, 0.0f, 0.0f));
-        camera_.setPosition(sl::Translation(0.0f, 0.0f, 6000.0f));
-        // Because setDirection() internally uses dir * -1, passing +Z makes the camera look downward (-Z)
-        camera_.setDirection(sl::Translation(0.0f, 0.0f, 1.0f), sl::Translation(1.0f, 0.0f, 0.0f));
+        camera_.setPosition(sl::Translation(0.0f, 0.0f, 1500.0f));
+        camera_.setOffsetFromPosition(sl::Translation(0.0f, 0.0f, 6000.0f));
+        camera_.translate(sl::Translation(0.0f, 1500.0f, -4000.0f));
+        camera_.setDirection(sl::Translation(0.0f, -1.0f, 0.0f), sl::Translation(0.0f, 1.0f, 0.0f));
     }
 
     // Rotate camera with mouse
@@ -820,13 +860,9 @@ bool Shader::compile(GLuint& shaderId, GLenum type, const GLchar* src) {
     return true;
 }
 
-// RIGHT_HANDED_Z_UP_X_FWD (ROS REP-103)
-// X: forward
-// Y: left
-// Z: up
-const sl::Translation CameraGL::ORIGINAL_FORWARD = sl::Translation(1, 0, 0);
-const sl::Translation CameraGL::ORIGINAL_UP      = sl::Translation(0, 0, 1);
-const sl::Translation CameraGL::ORIGINAL_RIGHT   = sl::Translation(0, 1, 0);
+const sl::Translation CameraGL::ORIGINAL_FORWARD = sl::Translation(0, 0, 1);
+const sl::Translation CameraGL::ORIGINAL_UP = sl::Translation(0, 1, 0);
+const sl::Translation CameraGL::ORIGINAL_RIGHT = sl::Translation(1, 0, 0);
 
 CameraGL::CameraGL(sl::Translation position, sl::Translation direction, sl::Translation vertical) {
     this->position_ = position;
