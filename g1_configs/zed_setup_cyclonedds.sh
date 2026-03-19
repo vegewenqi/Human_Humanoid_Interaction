@@ -12,13 +12,14 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CYCLONEDDS_URI="file://${SCRIPT_DIR}/zed_cyclonedds.xml"
 
-if [ -f /opt/ros/humble/setup.bash ]; then
-  source /opt/ros/humble/setup.bash
-fi
-
 echo "--------------------------------------------------------"
 echo "CycloneDDS environment ready on ZED"
 echo "RMW_IMPLEMENTATION : $RMW_IMPLEMENTATION"
 echo "ROS_DOMAIN_ID      : $ROS_DOMAIN_ID"
 echo "CYCLONEDDS_URI     : $CYCLONEDDS_URI"
 echo "--------------------------------------------------------"
+
+source /opt/ros/humble/setup.bash
+source ~/Projects/Human_Humanoid_Interaction/g1_real_ws/install/setup.bash
+
+exec ros2 run zed_skeleton_pub zed_skeleton_pub_node
