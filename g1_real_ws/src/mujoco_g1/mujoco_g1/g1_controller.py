@@ -32,7 +32,7 @@ class G1ActuatorController(Node):
         super().__init__("g1_actuator_controller")
 
         # ---------------- params ----------------
-        self.declare_parameter("mjcf_path", "/third_party/mujoco_menagerie/unitree_g1/g1_mjx.xml")
+        self.declare_parameter("mjcf_path", "/repos/unitree_g1/g1_mjx.xml")
         self.declare_parameter("qdes_topic", "/g1_upperbody_q_des")
         self.declare_parameter("qdes_in_degrees", False)
 
