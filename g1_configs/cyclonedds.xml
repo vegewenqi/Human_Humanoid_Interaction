@@ -2,7 +2,7 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <NetworkInterface autodetermine="true" multicast="default" />
+        <NetworkInterface name="eth0" multicast="default" />
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>
