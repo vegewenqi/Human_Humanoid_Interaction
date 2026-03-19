@@ -19,6 +19,10 @@ echo "ROS_DOMAIN_ID      : $ROS_DOMAIN_ID"
 echo "CYCLONEDDS_URI     : $CYCLONEDDS_URI"
 echo "--------------------------------------------------------"
 
+# Attach to Jetson display
+export DISPLAY=:0
+export XAUTHORITY=/run/user/1000/gdm/Xauthority
+
 source /opt/ros/humble/setup.bash
 source ~/Projects/Human_Humanoid_Interaction/g1_real_ws/install/setup.bash
 
