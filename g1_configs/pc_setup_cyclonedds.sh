@@ -21,13 +21,16 @@ exec docker exec -it \
   -e ROS_LOCALHOST_ONLY=0 \
   -e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
   -e CYCLONEDDS_URI="file://${CYCLONE_XML}" \
+  -e CMAKE_PREFIX_PATH="/opt/unitree_robotics:\$CMAKE_PREFIX_PATH" \
+  -e LD_LIBRARY_PATH="/opt/unitree_robotics/lib:\$LD_LIBRARY_PATH" \
   "$CONTAINER_NAME" \
   bash -lc "source '${ROS_SETUP}' && \
             unset ROS_DISCOVERY_SERVER && \
             echo '--------------------------------------------------------' && \
-            echo 'CycloneDDS environment ready inside Docker' && \
+            echo 'G1 Real-Robot Environment Ready inside Docker' && \
             echo 'RMW_IMPLEMENTATION : ' \"\$RMW_IMPLEMENTATION\" && \
             echo 'ROS_DOMAIN_ID      : ' \"\$ROS_DOMAIN_ID\" && \
             echo 'CYCLONEDDS_URI     : ' \"\$CYCLONEDDS_URI\" && \
+            echo 'UNITREE_SDK2_PATH  : /opt/unitree_robotics' && \
             echo '--------------------------------------------------------' && \
             exec bash"
