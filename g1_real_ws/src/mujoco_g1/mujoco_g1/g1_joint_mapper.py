@@ -73,6 +73,7 @@ class G1JointMapperNode(Node):
 
         # controller-aligned joint limits
         # aligned with the g1_controller.py defaults for g1_mjx.xml
+        # (-30-30, -30-30, -90-130, -60-120, -130,90, -60-120)
         self.declare_parameter(
             "q_min",
             [-0.52, -0.52, -1.5882, -1.0472, -2.2515, -1.0472]
