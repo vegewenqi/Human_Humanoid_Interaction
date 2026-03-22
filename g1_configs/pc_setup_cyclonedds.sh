@@ -17,7 +17,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME")" != "true" ]; 
 fi
 
 exec docker exec -it \
-  -e ROS_DOMAIN_ID=30 \
+  -e ROS_DOMAIN_ID=0 \
   -e ROS_LOCALHOST_ONLY=0 \
   -e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
   -e CYCLONEDDS_URI="file://${CYCLONE_XML}" \

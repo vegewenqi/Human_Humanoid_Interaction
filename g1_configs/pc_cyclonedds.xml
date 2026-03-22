@@ -2,13 +2,9 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <NetworkInterface name="eth0" multicast="default" />
+        <NetworkInterface name="eth0" priority="default" multicast="default" />
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>
-    <Discovery>
-      <ParticipantIndex>auto</ParticipantIndex>
-      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
-    </Discovery>
   </Domain>
 </CycloneDDS>
