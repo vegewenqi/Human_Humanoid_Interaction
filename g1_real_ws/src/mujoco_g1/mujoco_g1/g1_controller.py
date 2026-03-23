@@ -60,6 +60,7 @@ class G1ActuatorController(Node):
         )
 
         # startup pose for the 6 controlled joints
+        # home position: stand up straight with arms down
         self.declare_parameter(
             "q_home",
             [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]

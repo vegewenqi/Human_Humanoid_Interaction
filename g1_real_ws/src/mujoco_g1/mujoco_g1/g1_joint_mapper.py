@@ -45,7 +45,7 @@ class G1JointMapperNode(Node):
         )
 
         # robot home pose q_home
-        # keep elbows slightly bent for a more natural initial posture
+        # home position: stand up straight with arms down
         self.declare_parameter(
             "q_home",
             [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]
