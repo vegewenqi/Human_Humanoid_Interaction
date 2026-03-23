@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <thread>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
@@ -86,15 +87,16 @@ public:
 
         this->declare_parameter<double>("kp_arm", 60.0);
         this->declare_parameter<double>("kd_arm", 1.5);
-        this->declare_parameter<double>weight_("kp_waist", 40.0);
+        this->declare_parameter<double>("kp_waist", 40.0);
         this->declare_parameter<double>("kd_waist", 1.5);
         this->declare_parameter<double>("dq", 0.0);
         this->declare_parameter<double>("tau_ff", 0.0);
 
         this->declare_parameter<double>("weight_active", 1.0);
-        this->declare_parameter<double>("weight_release_rate", 0.2);  // same as official example: decrease by 0.2 per second
+        this->declare_parameter<double>("weight_release_rate", 0.2);   // official example style
+        this->declare_parameter<double>("shutdown_release_sec", 2.0);   // safe Ctrl+C release duration
 
-        // 6 DOF home positions:
+        // 6 DOF:
         // [waist_roll, waist_pitch, l_sh_roll, l_elbow, r_sh_roll, r_elbow]
         // home position: stand up straight with arms down
         // (-30-30, -30-30, -90-130, -60-120, -130,90, -60-120)
@@ -106,7 +108,7 @@ public:
             "q_min_6", {-0.52, -0.52, 0.0, -1.0472, -2.2515, -1.0472});
 
         this->declare_parameter<std::vector<double>>(
-            "q_max_6", { 0.52, 0.52, 2.2515, 2.0944, 0.0, 2.0944});
+            "q_max_6", { 0.52,  0.52, 2.2515,  2.0944,  0.0,     2.0944});
 
         network_interface_ = this->get_parameter("network_interface").as_string();
         qdes_topic_ = this->get_parameter("qdes_topic").as_string();
@@ -126,6 +128,7 @@ public:
 
         weight_active_ = this->get_parameter("weight_active").as_double();
         weight_release_rate_ = this->get_parameter("weight_release_rate").as_double();
+        shutdown_release_sec_ = this->get_parameter("shutdown_release_sec").as_double();
 
         q_home_6_ = this->get_parameter("q_home_6").as_double_array();
         q_min_6_  = this->get_parameter("q_min_6").as_double_array();
@@ -185,6 +188,7 @@ public:
         has_qdes_ = false;
         has_lowstate_ = false;
         started_control_ = false;
+        shutdown_released_ = false;
 
         timer_ = this->create_wall_timer(
             std::chrono::duration<double>(control_dt_),
@@ -195,7 +199,56 @@ public:
         RCLCPP_INFO(this->get_logger(), "qdes_topic        = %s", qdes_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "control_dt        = %.4f", control_dt_);
         RCLCPP_INFO(this->get_logger(), "max_joint_vel     = %.3f rad/s", max_joint_velocity_);
+        RCLCPP_INFO(this->get_logger(), "shutdown_release_sec = %.2f", shutdown_release_sec_);
         RCLCPP_INFO(this->get_logger(), "waist is ENABLED in this version.");
+    }
+
+    // Ctrl+C / shutdown
+    void ReleaseControlSafely() {
+        std::lock_guard<std::mutex> guard(shutdown_mtx_);
+        if (shutdown_released_) {
+            return;
+        }
+        shutdown_released_ = true;
+
+        if (!has_lowstate_) {
+            return;
+        }
+
+        RCLCPP_WARN(this->get_logger(), "Shutdown detected. Releasing arm control safely...");
+
+        // stop the control loop timer to prevent new commands from being sent while we are releasing
+        if (timer_) {
+            timer_->cancel();
+        }
+
+        const int steps = std::max(1, static_cast<int>(std::round(shutdown_release_sec_ / control_dt_)));
+
+        for (int i = 0; i < steps; ++i) {
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+
+                const float delta_weight = static_cast<float>(weight_release_rate_ * control_dt_);
+                weight_ -= delta_weight;
+                weight_ = ClampF(weight_, 0.0f, static_cast<float>(weight_active_));
+
+                unitree_hg::msg::dds_::LowCmd_ msg;
+                FillLowCmdFromCurrentDes(msg);
+                arm_sdk_publisher_->Write(msg);
+            }
+            std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
+        }
+
+        // final command to ensure weight is set to zero
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            weight_ = 0.0f;
+            unitree_hg::msg::dds_::LowCmd_ msg;
+            FillLowCmdFromCurrentDes(msg);
+            arm_sdk_publisher_->Write(msg);
+        }
+
+        RCLCPP_WARN(this->get_logger(), "Arm control released. Safe shutdown complete.");
     }
 
 private:
@@ -274,7 +327,7 @@ private:
         q17.at(13) = 0.0f;                 // right wrist yaw
 
         // waist
-        q17.at(14) = 0.0f;
+        q17.at(14) = 0.0f;                    // waist yaw
         q17.at(15) = static_cast<float>(q6[0]); // waist roll
         q17.at(16) = static_cast<float>(q6[1]); // waist pitch
     }
@@ -391,6 +444,7 @@ private:
 
     double weight_active_;
     double weight_release_rate_;
+    double shutdown_release_sec_;
 
     std::vector<double> q_home_6_;
     std::vector<double> q_min_6_;
@@ -406,6 +460,7 @@ private:
 
     // state
     std::mutex mtx_;
+    std::mutex shutdown_mtx_;
     unitree_hg::msg::dds_::LowState_ state_msg_;
 
     std::array<JointIndex, 17> arm_joints_;
@@ -419,6 +474,7 @@ private:
     bool has_qdes_;
     bool has_lowstate_;
     bool started_control_;
+    bool shutdown_released_;
     float weight_;
 
     rclcpp::Time last_qdes_time_;
@@ -427,7 +483,16 @@ private:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
+
     auto node = std::make_shared<G1ArmSdkBridge>();
+
+    // Ctrl+C / safely release before shutdown
+    rclcpp::on_shutdown([node]() {
+        if (node) {
+            node->ReleaseControlSafely();
+        }
+    });
+
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
