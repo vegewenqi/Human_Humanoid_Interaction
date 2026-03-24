@@ -14,8 +14,8 @@ def generate_launch_description():
                 'qdes_in_degrees': False,
 
                 'control_dt': 0.02,
-                'ema_alpha': 0.08,
-                'max_joint_velocity': 0.15,
+                'ema_alpha': 0.2,
+                'max_joint_velocity': 0.5,
                 'home_transition_velocity': 0.05,
                 'home_hold_sec': 5.0,
                 'track_entry_blend_sec': 3.0,
