@@ -55,7 +55,7 @@ class G1JointMapperNode(Node):
         # initial recommendation: keep all +1 first, then flip individual entries if needed
         self.declare_parameter(
             "signs",
-            [1.0, 1.0, 1.0, -1.0, -1.0, -1.0]
+            [-1.0, 1.0, 1.0, -1.0, -1.0, -1.0]
         )
 
         # scale gain g_j
