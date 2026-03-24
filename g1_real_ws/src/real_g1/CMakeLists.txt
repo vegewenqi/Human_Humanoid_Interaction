@@ -8,19 +8,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-
-set(UNITREE_SDK2_DIR /repos/unitree_sdk2)
-set(UNITREE_ARCH x86_64)
+find_package(unitree_hg REQUIRED)
 
 include_directories(
-  ${UNITREE_SDK2_DIR}/include
-  ${UNITREE_SDK2_DIR}/thirdparty/include
-  ${UNITREE_SDK2_DIR}/thirdparty/include/ddscxx
-)
-
-link_directories(
-  ${UNITREE_SDK2_DIR}/lib/${UNITREE_ARCH}
-  ${UNITREE_SDK2_DIR}/thirdparty/lib/${UNITREE_ARCH}
+  /repos/unitree_ros2/example/src/include
 )
 
 add_executable(g1_arm_sdk_bridge
@@ -30,12 +21,7 @@ add_executable(g1_arm_sdk_bridge
 ament_target_dependencies(g1_arm_sdk_bridge
   rclcpp
   std_msgs
-)
-
-target_link_libraries(g1_arm_sdk_bridge
-  unitree_sdk2
-  ddscxx
-  ddsc
+  unitree_hg
 )
 
 install(TARGETS

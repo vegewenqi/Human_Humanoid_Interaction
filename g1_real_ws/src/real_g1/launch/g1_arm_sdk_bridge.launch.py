@@ -9,7 +9,7 @@ def generate_launch_description():
             name='g1_arm_sdk_bridge',
             output='screen',
             parameters=[{
-                'network_interface': 'eth0',
+                'network_interface': 'enx98ded0145852',
                 'qdes_topic': '/g1_upperbody_q_des',
                 'qdes_in_degrees': False,
                 'control_dt': 0.02,
