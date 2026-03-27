@@ -59,13 +59,13 @@ class G1ArmSdkBridge : public rclcpp::Node {
     this->declare_parameter<bool>("hold_uncontrolled_joints_at_start_pose", true);
 
     // Input order:
-    // [waist_roll, waist_pitch, l_sh_roll, l_elbow, r_sh_roll, r_elbow]
+    // [waist_roll, waist_pitch, l_sh_pitch, l_sh_roll, l_elbow, r_sh_pitch, r_sh_roll, r_elbow]
     this->declare_parameter<std::vector<double>>(
-        "q_home_6", {0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708});
+        "q_home_8", {0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708});
     this->declare_parameter<std::vector<double>>(
-        "q_min_6", {-0.52, -0.52, 0.0, -1.0472, -2.2515, -1.0472});
+        "q_min_8", {-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472});
     this->declare_parameter<std::vector<double>>(
-        "q_max_6", {0.52, 0.52, 2.2515, 2.0944, 0.0, 2.0944});
+        "q_max_8", {0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944});
 
     qdes_topic_ = this->get_parameter("qdes_topic").as_string();
     qdes_in_degrees_ = this->get_parameter("qdes_in_degrees").as_bool();
@@ -98,12 +98,12 @@ class G1ArmSdkBridge : public rclcpp::Node {
     hold_uncontrolled_joints_at_start_pose_ =
         this->get_parameter("hold_uncontrolled_joints_at_start_pose").as_bool();
 
-    q_home_6_ = this->get_parameter("q_home_6").as_double_array();
-    q_min_6_ = this->get_parameter("q_min_6").as_double_array();
-    q_max_6_ = this->get_parameter("q_max_6").as_double_array();
+    q_home_8_ = this->get_parameter("q_home_8").as_double_array();
+    q_min_8_ = this->get_parameter("q_min_8").as_double_array();
+    q_max_8_ = this->get_parameter("q_max_8").as_double_array();
 
-    if (q_home_6_.size() != 6 || q_min_6_.size() != 6 || q_max_6_.size() != 6) {
-      throw std::runtime_error("q_home_6 / q_min_6 / q_max_6 must all have length 6");
+    if (q_home_8_.size() != 8 || q_min_8_.size() != 8 || q_max_8_.size() != 8) {
+      throw std::runtime_error("q_home_8 / q_min_8 / q_max_8 must all have length 8");
     }
 
     max_joint_delta_ = max_joint_velocity_ * control_dt_;
@@ -135,10 +135,10 @@ class G1ArmSdkBridge : public rclcpp::Node {
     desired_17_.fill(0.0F);
     base_q_17_.fill(0.0F);
 
-    latest_q_des_6_.assign(6, 0.0);
-    q_target_safe_6_.assign(6, 0.0);
-    q_home_start_6_.assign(6, 0.0);
-    track_start_6_.assign(6, 0.0);
+    latest_q_des_8_.assign(8, 0.0);
+    q_target_safe_8_.assign(8, 0.0);
+    q_home_start_8_.assign(8, 0.0);
+    track_start_8_.assign(8, 0.0);
 
     has_qdes_ = false;
     has_lowstate_ = false;
@@ -194,7 +194,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
     }
 
     std::array<float, NUM_ARM_JOINTS> shutdown_target_17 = base_q_17_;
-    ApplyInput6ToDesired17(q_home_6_, base_q_17_, shutdown_target_17);
+    ApplyInput8ToDesired17(q_home_8_, base_q_17_, shutdown_target_17);
 
     const int move_steps = std::max(
         1, static_cast<int>(std::ceil(GetMaxAbsError(current_jpos_des_, shutdown_target_17) /
@@ -285,21 +285,21 @@ class G1ArmSdkBridge : public rclcpp::Node {
   }
 
   void OnQdes(const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
-    if (msg->data.size() != 6) {
+    if (msg->data.size() != 8) {
       RCLCPP_WARN(this->get_logger(),
-                  "Expected /g1_upperbody_q_des dim=6, got %zu",
+                  "Expected /g1_upperbody_q_des dim=8, got %zu",
                   msg->data.size());
       return;
     }
 
     std::lock_guard<std::mutex> lock(mtx_);
 
-    for (size_t i = 0; i < 6; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
       double v = static_cast<double>(msg->data[i]);
       if (qdes_in_degrees_) {
         v = v * kPi / 180.0;
       }
-      latest_q_des_6_[i] = Clamp(v, q_min_6_[i], q_max_6_[i]);
+      latest_q_des_8_[i] = Clamp(v, q_min_8_[i], q_max_8_[i]);
     }
 
     has_qdes_ = true;
@@ -320,9 +320,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
       desired_17_ = current_jpos_meas_;
       base_q_17_ = current_jpos_meas_;
 
-      q_home_start_6_ = ExtractInput6FromMeasured17(current_jpos_meas_);
-      q_target_safe_6_ = q_home_start_6_;
-      track_start_6_ = q_home_start_6_;
+      q_home_start_8_ = ExtractInput8FromMeasured17(current_jpos_meas_);
+      q_target_safe_8_ = q_home_start_8_;
+      track_start_8_ = q_home_start_8_;
 
       home_transition_start_time_ = this->now();
       home_hold_start_time_ = this->now();
@@ -337,33 +337,37 @@ class G1ArmSdkBridge : public rclcpp::Node {
     }
   }
 
-  std::vector<double> ExtractInput6FromMeasured17(
+  std::vector<double> ExtractInput8FromMeasured17(
       const std::array<float, NUM_ARM_JOINTS> &q17_meas) const {
-    std::vector<double> q6(6, 0.0);
-    q6[0] = static_cast<double>(q17_meas[15]);
-    q6[1] = static_cast<double>(q17_meas[16]);
-    q6[2] = static_cast<double>(q17_meas[1]);
-    q6[3] = static_cast<double>(q17_meas[3]);
-    q6[4] = static_cast<double>(q17_meas[8]);
-    q6[5] = static_cast<double>(q17_meas[10]);
+    std::vector<double> q8(8, 0.0);
+    q8[0] = static_cast<double>(q17_meas[15]);
+    q8[1] = static_cast<double>(q17_meas[16]);
+    q8[2] = static_cast<double>(q17_meas[0]);
+    q8[3] = static_cast<double>(q17_meas[1]);
+    q8[4] = static_cast<double>(q17_meas[3]);
+    q8[5] = static_cast<double>(q17_meas[7]);
+    q8[6] = static_cast<double>(q17_meas[8]);
+    q8[7] = static_cast<double>(q17_meas[10]);
 
-    for (size_t i = 0; i < 6; ++i) {
-      q6[i] = Clamp(q6[i], q_min_6_[i], q_max_6_[i]);
+    for (size_t i = 0; i < 8; ++i) {
+      q8[i] = Clamp(q8[i], q_min_8_[i], q_max_8_[i]);
     }
-    return q6;
+    return q8;
   }
 
-  void ApplyInput6ToDesired17(const std::vector<double> &q6,
+  void ApplyInput8ToDesired17(const std::vector<double> &q8,
                               const std::array<float, NUM_ARM_JOINTS> &base_q17,
                               std::array<float, NUM_ARM_JOINTS> &q17) {
     q17 = base_q17;
-
-    q17[1] = static_cast<float>(q6[2]);
-    q17[3] = static_cast<float>(q6[3]);
-    q17[8] = static_cast<float>(q6[4]);
-    q17[10] = static_cast<float>(q6[5]);
-    q17[15] = static_cast<float>(q6[0]);
-    q17[16] = static_cast<float>(q6[1]);
+    
+    q17[0] = static_cast<float>(q8[2]);
+    q17[1] = static_cast<float>(q8[3]);
+    q17[3] = static_cast<float>(q8[4]);
+    q17[7] = static_cast<float>(q8[5]);
+    q17[8] = static_cast<float>(q8[6]);
+    q17[10] = static_cast<float>(q8[7]);
+    q17[15] = static_cast<float>(q8[0]);
+    q17[16] = static_cast<float>(q8[1]);
   }
 
   void FillLowCmdFromCurrentDes(LowCmd &cmd) {
@@ -396,8 +400,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
     if (!qdes_gate_open_) {
       qdes_gate_open_ = true;
       track_entry_start_time_ = this->now();
-      track_start_6_ = q_home_6_;
-      q_target_safe_6_ = q_home_6_;
+      track_start_8_ = q_home_8_;
+      q_target_safe_8_ = q_home_8_;
       RCLCPP_INFO(this->get_logger(), "Initialization phase complete. q_des gate is now open.");
       return BridgeMode::WAIT_FOR_QDES;
     }
@@ -414,19 +418,19 @@ class G1ArmSdkBridge : public rclcpp::Node {
   std::vector<double> ComputeHomeReference(const rclcpp::Time &now) {
     if (!auto_move_to_home_) {
       home_reached_ = true;
-      return q_home_6_;
+      return q_home_8_;
     }
 
     const double elapsed = (now - home_transition_start_time_).seconds();
     const double move_duration = GetHomeMoveDuration();
 
-    std::vector<double> q6(6, 0.0);
-    for (size_t i = 0; i < 6; ++i) {
-      const double dist = std::fabs(q_home_6_[i] - q_home_start_6_[i]);
+    std::vector<double> q8(8, 0.0);
+    for (size_t i = 0; i < 8; ++i) {
+      const double dist = std::fabs(q_home_8_[i] - q_home_start_8_[i]);
       const double duration =
           (home_transition_velocity_ > 1e-6) ? dist / home_transition_velocity_ : 0.0;
       const double ti = (duration > 1e-6) ? Clamp(elapsed / duration, 0.0, 1.0) : 1.0;
-      q6[i] = Lerp(q_home_start_6_[i], q_home_6_[i], ti);
+      q8[i] = Lerp(q_home_start_8_[i], q_home_8_[i], ti);
     }
 
     if (elapsed >= move_duration) {
@@ -435,8 +439,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
       }
       if ((now - home_transition_start_time_).seconds() >= move_duration + home_hold_sec_) {
         home_reached_ = true;
-        q_target_safe_6_ = q_home_6_;
-        track_start_6_ = q_home_6_;
+        q_target_safe_8_ = q_home_8_;
+        track_start_8_ = q_home_8_;
         track_entry_done_ = false;
         RCLCPP_INFO(this->get_logger(), "Home hold complete.");
       }
@@ -444,41 +448,41 @@ class G1ArmSdkBridge : public rclcpp::Node {
       home_hold_start_time_ = now;
     }
 
-    return q6;
+    return q8;
   }
 
   std::vector<double> ComputeTrackEntryReference(const rclcpp::Time &now, bool qdes_fresh) {
     if (!qdes_fresh) {
       track_entry_done_ = false;
-      return q_home_6_;
+      return q_home_8_;
     }
 
     const double elapsed = (now - track_entry_start_time_).seconds();
     const double duration = std::max(control_dt_, track_entry_blend_sec_);
     const double t = Clamp(elapsed / duration, 0.0, 1.0);
 
-    std::vector<double> target6 = latest_q_des_6_;
-    for (size_t i = 0; i < 6; ++i) {
-      target6[i] = Clamp(target6[i], q_min_6_[i], q_max_6_[i]);
-      target6[i] = ema_alpha_ * target6[i] + (1.0 - ema_alpha_) * q_target_safe_6_[i];
+    std::vector<double> target8 = latest_q_des_8_;
+    for (size_t i = 0; i < 8; ++i) {
+      target8[i] = Clamp(target8[i], q_min_8_[i], q_max_8_[i]);
+      target8[i] = ema_alpha_ * target8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
     }
 
-    std::vector<double> q6(6, 0.0);
-    for (size_t i = 0; i < 6; ++i) {
-      q6[i] = Lerp(track_start_6_[i], target6[i], t);
+    std::vector<double> q8(8, 0.0);
+    for (size_t i = 0; i < 8; ++i) {
+      q8[i] = Lerp(track_start_8_[i], target8[i], t);
     }
 
     if (t >= 1.0) {
       track_entry_done_ = true;
     }
 
-    return q6;
+    return q8;
   }
 
   double GetHomeMoveDuration() const {
     double max_duration = 0.0;
-    for (size_t i = 0; i < 6; ++i) {
-      const double dist = std::fabs(q_home_6_[i] - q_home_start_6_[i]);
+    for (size_t i = 0; i < 8; ++i) {
+      const double dist = std::fabs(q_home_8_[i] - q_home_start_8_[i]);
       const double duration =
           (home_transition_velocity_ > 1e-6) ? dist / home_transition_velocity_ : 0.0;
       max_duration = std::max(max_duration, duration);
@@ -519,14 +523,14 @@ class G1ArmSdkBridge : public rclcpp::Node {
     const BridgeMode mode = GetCurrentMode(qdes_fresh);
 
     double used_max_delta = max_joint_delta_;
-    std::vector<double> q_ref_6 = q_target_safe_6_;
+    std::vector<double> q_ref_8 = q_target_safe_8_;
 
     if (mode == BridgeMode::HOLD_CURRENT) {
       desired_17_ = current_jpos_meas_;
       weight_ = 0.0F;
     } else if (mode == BridgeMode::MOVE_TO_HOME) {
-      q_ref_6 = ComputeHomeReference(now);
-      q_target_safe_6_ = q_ref_6;
+      q_ref_8 = ComputeHomeReference(now);
+      q_target_safe_8_ = q_ref_8;
       used_max_delta = home_max_joint_delta_;
       if (use_weight_ramp_) {
         weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
@@ -534,35 +538,35 @@ class G1ArmSdkBridge : public rclcpp::Node {
       } else {
         weight_ = static_cast<float>(weight_active_);
       }
-      ApplyInput6ToDesired17(q_ref_6, base_q_17_, desired_17_);
+      ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
     } else if (mode == BridgeMode::WAIT_FOR_QDES) {
-      q_ref_6 = q_home_6_;
-      q_target_safe_6_ = q_ref_6;
-      track_start_6_ = q_home_6_;
+      q_ref_8 = q_home_8_;
+      q_target_safe_8_ = q_ref_8;
+      track_start_8_ = q_home_8_;
       if (use_weight_ramp_) {
         weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
                          0.0F, static_cast<float>(weight_active_));
       } else {
         weight_ = static_cast<float>(weight_active_);
       }
-      ApplyInput6ToDesired17(q_ref_6, base_q_17_, desired_17_);
+      ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
     } else if (mode == BridgeMode::TRACK_ENTRY) {
       used_max_delta = max_joint_delta_;
-      q_ref_6 = ComputeTrackEntryReference(now, qdes_fresh);
-      q_target_safe_6_ = q_ref_6;
+      q_ref_8 = ComputeTrackEntryReference(now, qdes_fresh);
+      q_target_safe_8_ = q_ref_8;
       if (use_weight_ramp_) {
         weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
                          0.0F, static_cast<float>(weight_active_));
       } else {
         weight_ = static_cast<float>(weight_active_);
       }
-      ApplyInput6ToDesired17(q_target_safe_6_, base_q_17_, desired_17_);
+      ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
     } else {
-      q_ref_6 = latest_q_des_6_;
-      for (size_t i = 0; i < 6; ++i) {
-        q_ref_6[i] = Clamp(q_ref_6[i], q_min_6_[i], q_max_6_[i]);
-        q_target_safe_6_[i] =
-            ema_alpha_ * q_ref_6[i] + (1.0 - ema_alpha_) * q_target_safe_6_[i];
+      q_ref_8 = latest_q_des_8_;
+      for (size_t i = 0; i < 8; ++i) {
+        q_ref_8[i] = Clamp(q_ref_8[i], q_min_8_[i], q_max_8_[i]);
+        q_target_safe_8_[i] =
+            ema_alpha_ * q_ref_8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
       }
       if (use_weight_ramp_) {
         weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
@@ -570,7 +574,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
       } else {
         weight_ = static_cast<float>(weight_active_);
       }
-      ApplyInput6ToDesired17(q_target_safe_6_, base_q_17_, desired_17_);
+      ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
     }
 
     StepTowardsDesired(used_max_delta);
@@ -601,17 +605,19 @@ class G1ArmSdkBridge : public rclcpp::Node {
       }
       RCLCPP_INFO(
           this->get_logger(),
-          "[bridge] mode=%s gate=%s weight=%.2f fresh=%s | q6_deg: wr=%.1f wp=%.1f lsr=%.1f le=%.1f rsr=%.1f re=%.1f",
+          "[bridge] mode=%s gate=%s weight=%.2f fresh=%s | q8_deg: wr=%.1f wp=%.1f lsr=%.1f le=%.1f rsr=%.1f re=%.1f",
           mode_str,
           qdes_gate_open_ ? "open" : "closed",
           weight_,
           qdes_fresh ? "true" : "false",
-          deg(q_target_safe_6_[0]),
-          deg(q_target_safe_6_[1]),
-          deg(q_target_safe_6_[2]),
-          deg(q_target_safe_6_[3]),
-          deg(q_target_safe_6_[4]),
-          deg(q_target_safe_6_[5]));
+          deg(q_target_safe_8_[0]),
+          deg(q_target_safe_8_[1]),
+          deg(q_target_safe_8_[2]),
+          deg(q_target_safe_8_[3]),
+          deg(q_target_safe_8_[4]),
+          deg(q_target_safe_8_[5]),
+          deg(q_target_safe_8_[6]),
+          deg(q_target_safe_8_[7]));
       last_log_time_ = now;
     }
   }
@@ -657,9 +663,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
   bool auto_move_to_home_;
   double home_hold_sec_;
 
-  std::vector<double> q_home_6_;
-  std::vector<double> q_min_6_;
-  std::vector<double> q_max_6_;
+  std::vector<double> q_home_8_;
+  std::vector<double> q_min_8_;
+  std::vector<double> q_max_8_;
 
   std::chrono::milliseconds sleep_time_{};
 
@@ -671,10 +677,10 @@ class G1ArmSdkBridge : public rclcpp::Node {
   std::array<float, NUM_ARM_JOINTS> desired_17_;
   std::array<float, NUM_ARM_JOINTS> base_q_17_;
 
-  std::vector<double> latest_q_des_6_;
-  std::vector<double> q_target_safe_6_;
-  std::vector<double> q_home_start_6_;
-  std::vector<double> track_start_6_;
+  std::vector<double> latest_q_des_8_;
+  std::vector<double> q_target_safe_8_;
+  std::vector<double> q_home_start_8_;
+  std::vector<double> track_start_8_;
 
   bool has_qdes_;
   bool has_lowstate_;

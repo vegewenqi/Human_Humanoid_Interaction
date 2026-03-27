@@ -9,8 +9,10 @@ from .human_math import build_torso_frame, express_in_torso, angle_between
 class HumanUpperBodyAngles:
     torso_roll: float
     torso_pitch: float
+    l_sh_pitch: float
     l_sh_roll: float
     l_el_pitch: float
+    r_sh_pitch: float
     r_sh_roll: float
     r_el_pitch: float
 
@@ -64,17 +66,25 @@ class HumanAngleEstimatorCore:
         # shoulder / elbow angles
         l_sh_roll = self._estimate_left_shoulder_roll(u_l_t)
         r_sh_roll = self._estimate_right_shoulder_roll(u_r_t)
+        l_sh_pitch = self._estimate_left_shoulder_pitch(u_l_t)
+        r_sh_pitch = self._estimate_right_shoulder_pitch(u_r_t)
         l_el_pitch = self._estimate_elbow_pitch(u_l, f_l)
         r_el_pitch = self._estimate_elbow_pitch(u_r, f_r)
 
-        if None in [torso_roll, torso_pitch, l_sh_roll, r_sh_roll, l_el_pitch, r_el_pitch]:
+        if None in [
+            torso_roll, torso_pitch,
+            l_sh_pitch, l_sh_roll, l_el_pitch,
+            r_sh_pitch, r_sh_roll, r_el_pitch
+        ]:
             return None
 
         return HumanUpperBodyAngles(
             torso_roll=float(torso_roll),
             torso_pitch=float(torso_pitch),
+            l_sh_pitch=float(l_sh_pitch),
             l_sh_roll=float(l_sh_roll),
             l_el_pitch=float(l_el_pitch),
+            r_sh_pitch=float(r_sh_pitch),
             r_sh_roll=float(r_sh_roll),
             r_el_pitch=float(r_el_pitch),
         )
@@ -156,6 +166,26 @@ class HumanAngleEstimatorCore:
         """
         ux, uy, uz = u_r_t
         return float(np.arctan2(ux, -uz))
+    
+    def _estimate_left_shoulder_pitch(self, u_l_t: np.ndarray) -> float:
+        """
+        Left shoulder pitch:
+        hanging down  -> ~0
+        forward raise -> positive
+        backward move -> negative
+        """
+        ux, uy, uz = u_l_t
+        return float(np.arctan2(uy, -uz))
+
+    def _estimate_right_shoulder_pitch(self, u_r_t: np.ndarray) -> float:
+        """
+        Right shoulder pitch:
+        hanging down  -> ~0
+        forward raise -> positive
+        backward move -> negative
+        """
+        ux, uy, uz = u_r_t
+        return float(np.arctan2(uy, -uz))
 
     def _estimate_elbow_pitch(self, u: np.ndarray, f: np.ndarray) -> Optional[float]:
         """

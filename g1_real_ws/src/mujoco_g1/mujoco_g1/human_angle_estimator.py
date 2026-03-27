@@ -107,8 +107,10 @@ class HumanAngleEstimatorNode(Node):
             [
                 angle_dict["torso_roll"],
                 angle_dict["torso_pitch"],
+                angle_dict["l_sh_pitch"],
                 angle_dict["l_sh_roll"],
                 angle_dict["l_el_pitch"],
+                angle_dict["r_sh_pitch"],
                 angle_dict["r_sh_roll"],
                 angle_dict["r_el_pitch"],
             ],
@@ -124,8 +126,8 @@ class HumanAngleEstimatorNode(Node):
         return (
             f"{prefix}[{unit}] "
             f"torso_roll={data[0]:.2f}, torso_pitch={data[1]:.2f}, "
-            f"l_sh_roll={data[2]:.2f}, l_el_pitch={data[3]:.2f}, "
-            f"r_sh_roll={data[4]:.2f}, r_el_pitch={data[5]:.2f}"
+            f"l_sh_pitch={data[2]:.2f}, l_sh_roll={data[3]:.2f}, l_el_pitch={data[4]:.2f}, "
+            f"r_sh_pitch={data[5]:.2f}, r_sh_roll={data[6]:.2f}, r_el_pitch={data[7]:.2f}"
         )
 
     def on_points(self, msg: PointCloud2):
@@ -146,8 +148,10 @@ class HumanAngleEstimatorNode(Node):
         angle_dict = {
             "torso_roll": angles.torso_roll,
             "torso_pitch": angles.torso_pitch,
+            "l_sh_pitch": angles.l_sh_pitch,
             "l_sh_roll": angles.l_sh_roll,
             "l_el_pitch": angles.l_el_pitch,
+            "r_sh_pitch": angles.r_sh_pitch,
             "r_sh_roll": angles.r_sh_roll,
             "r_el_pitch": angles.r_el_pitch,
         }

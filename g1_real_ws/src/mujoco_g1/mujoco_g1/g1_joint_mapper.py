@@ -9,12 +9,12 @@ class G1JointMapperNode(Node):
     Input:
         /human_joint_angles_delta   Float32MultiArray
         order:
-        [torso_roll, torso_pitch, l_sh_roll, l_el_pitch, r_sh_roll, r_el_pitch]
+        [ torso_roll, torso_pitch, l_sh_pitch, l_sh_roll, l_el_pitch, r_sh_pitch, r_sh_roll, r_el_pitch ]
 
     Output:
         /g1_upperbody_q_des         Float32MultiArray
         order:
-        [waist_roll, waist_pitch, l_sh_roll, l_elbow, r_sh_roll, r_elbow]
+        [waist_roll, waist_pitch, left_shoulder_pitch, left_shoulder_roll, left_elbow, right_shoulder_pitch, right_shoulder_roll, right_elbow]
     """
 
     def __init__(self):
@@ -37,8 +37,10 @@ class G1JointMapperNode(Node):
             [
                 "waist_roll_joint",
                 "waist_pitch_joint",
+                "left_shoulder_pitch_joint",
                 "left_shoulder_roll_joint",
                 "left_elbow_joint",
+                "right_shoulder_pitch_joint",
                 "right_shoulder_roll_joint",
                 "right_elbow_joint",
             ],
@@ -48,39 +50,39 @@ class G1JointMapperNode(Node):
         # home position: stand up straight with arms down
         self.declare_parameter(
             "q_home",
-            [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]
+            [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708]
         )
 
         # direction sign s_j
         # initial recommendation: keep all +1 first, then flip individual entries if needed
         self.declare_parameter(
             "signs",
-            [-1.0, 1.0, 1.0, -1.0, -1.0, -1.0]
+            [-1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0]
         )
 
         # scale gain g_j
         # initial recommendation: 1-to-1 angle mapping
         self.declare_parameter(
             "gains",
-            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         )
 
         # extra bias b_j
         self.declare_parameter(
             "bias",
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         )
 
         # controller-aligned joint limits
         # aligned with the g1_controller.py defaults for g1_mjx.xml
-        # (-30-30, -30-30, -90-130, -60-120, -130,90, -60-120)
+        # (-30-30, -30-30, -177-153, -90-130, -60-120, -177-153, -130,90, -60-120)
         self.declare_parameter(
             "q_min",
-            [-0.52, -0.52, -1.5882, -1.0472, -2.2515, -1.0472]
+            [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472]
         )
         self.declare_parameter(
             "q_max",
-            [0.52, 0.52,  2.2515,  2.0944,  1.5882,  2.0944]
+            [0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944]
         )
 
         self.input_topic = str(self.get_parameter("input_topic").value)
@@ -97,7 +99,7 @@ class G1JointMapperNode(Node):
         self.q_min = np.array(self.get_parameter("q_min").value, dtype=np.float64)
         self.q_max = np.array(self.get_parameter("q_max").value, dtype=np.float64)
 
-        self.expected_dim = 6
+        self.expected_dim = 8
         for arr_name, arr in [
             ("q_home", self.q_home),
             ("signs", self.signs),
@@ -160,8 +162,8 @@ class G1JointMapperNode(Node):
                 self.get_logger().info(
                     "[human_delta_deg] "
                     f"torso_roll={human_disp[0]:.2f}, torso_pitch={human_disp[1]:.2f}, "
-                    f"l_sh_roll={human_disp[2]:.2f}, l_el_pitch={human_disp[3]:.2f}, "
-                    f"r_sh_roll={human_disp[4]:.2f}, r_el_pitch={human_disp[5]:.2f}"
+                    f"l_sh_pitch={human_disp[2]:.2f}, l_sh_roll={human_disp[3]:.2f}, l_el_pitch={human_disp[4]:.2f}, "
+                    f"r_sh_pitch={human_disp[5]:.2f}, r_sh_roll={human_disp[6]:.2f}, r_el_pitch={human_disp[7]:.2f}"
                 )
 
             if self.log_output in ["qdes", "both"]:
@@ -169,8 +171,8 @@ class G1JointMapperNode(Node):
                 self.get_logger().info(
                     "[g1_q_des_deg] "
                     f"waist_roll={q_disp[0]:.2f}, waist_pitch={q_disp[1]:.2f}, "
-                    f"l_sh_roll={q_disp[2]:.2f}, l_elbow={q_disp[3]:.2f}, "
-                    f"r_sh_roll={q_disp[4]:.2f}, r_elbow={q_disp[5]:.2f}"
+                    f"l_sh_pitch={q_disp[2]:.2f}, l_sh_roll={q_disp[3]:.2f}, l_elbow={q_disp[4]:.2f}, "
+                    f"r_sh_pitch={q_disp[5]:.2f}, r_sh_roll={q_disp[6]:.2f}, r_elbow={q_disp[7]:.2f}"
                 )
 
             self.last_log_time = now

@@ -17,7 +17,7 @@ class G1ActuatorController(Node):
     Input topic:
         /g1_upperbody_q_des   Float32MultiArray
         order:
-        [waist_roll, waist_pitch, left_shoulder_roll, left_elbow, right_shoulder_roll, right_elbow]
+        [waist_roll, waist_pitch, left_shoulder_pitch, left_shoulder_roll, left_elbow, right_shoulder_pitch, right_shoulder_roll, right_elbow]
 
     Control:
         Uses MuJoCo position actuators:
@@ -52,29 +52,31 @@ class G1ActuatorController(Node):
             [
                 "waist_roll_joint",
                 "waist_pitch_joint",
+                "left_shoulder_pitch_joint",
                 "left_shoulder_roll_joint",
                 "left_elbow_joint",
+                "right_shoulder_pitch_joint",
                 "right_shoulder_roll_joint",
                 "right_elbow_joint",
             ],
         )
 
-        # startup pose for the 6 controlled joints
+        # startup pose for the 8 controlled joints
         # home position: stand up straight with arms down
         self.declare_parameter(
             "q_home",
-            [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708]
+            [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708]
         )
 
         # controller-side clipping
-        # (-30-30, -30-30, -90-130, -60-120, -130,90, -60-120)
+        # (-30-30, -30-30, -177-153, -90-130, -60-120, -177-153, -130,90, -60-120)
         self.declare_parameter(
             "q_min",
-            [-0.52, -0.52, -1.5882, -1.0472, -2.2515, -1.0472]
+            [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472]
         )
         self.declare_parameter(
             "q_max",
-            [0.52, 0.52,  2.2515,  2.0944,  1.5882,  2.0944]
+            [0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944]
         )
 
         self.declare_parameter("apply_q_home_on_start", True)
@@ -303,8 +305,8 @@ class G1ActuatorController(Node):
                 self.get_logger().info(
                     "[q_des_cmd_deg] "
                     f"waist_roll={qd_deg[0]:.2f}, waist_pitch={qd_deg[1]:.2f}, "
-                    f"l_sh_roll={qd_deg[2]:.2f}, l_elbow={qd_deg[3]:.2f}, "
-                    f"r_sh_roll={qd_deg[4]:.2f}, r_elbow={qd_deg[5]:.2f}"
+                    f"l_sh_pitch={qd_deg[2]:.2f}, l_sh_roll={qd_deg[3]:.2f}, l_elbow={qd_deg[4]:.2f}, "
+                    f"r_sh_pitch={qd_deg[5]:.2f}, r_sh_roll={qd_deg[6]:.2f}, r_elbow={qd_deg[7]:.2f}"
                 )
 
             if self.log_output in ["q", "both"]:
@@ -312,8 +314,8 @@ class G1ActuatorController(Node):
                 self.get_logger().info(
                     "[q_now_deg] "
                     f"waist_roll={q_deg[0]:.2f}, waist_pitch={q_deg[1]:.2f}, "
-                    f"l_sh_roll={q_deg[2]:.2f}, l_elbow={q_deg[3]:.2f}, "
-                    f"r_sh_roll={q_deg[4]:.2f}, r_elbow={q_deg[5]:.2f}"
+                    f"l_sh_pitch={q_deg[2]:.2f}, l_sh_roll={q_deg[3]:.2f}, l_elbow={q_deg[4]:.2f}, "
+                    f"r_sh_pitch={q_deg[5]:.2f}, r_sh_roll={q_deg[6]:.2f}, r_elbow={q_deg[7]:.2f}"
                 )
 
             if self.log_output in ["ctrl", "both"]:
@@ -321,8 +323,8 @@ class G1ActuatorController(Node):
                 self.get_logger().info(
                     "[ctrl_position_deg] "
                     f"waist_roll={c_deg[0]:.2f}, waist_pitch={c_deg[1]:.2f}, "
-                    f"l_sh_roll={c_deg[2]:.2f}, l_elbow={c_deg[3]:.2f}, "
-                    f"r_sh_roll={c_deg[4]:.2f}, r_elbow={c_deg[5]:.2f}"
+                    f"l_sh_pitch={c_deg[2]:.2f}, l_sh_roll={c_deg[3]:.2f}, l_elbow={c_deg[4]:.2f}, "
+                    f"r_sh_pitch={c_deg[5]:.2f}, r_sh_roll={c_deg[6]:.2f}, r_elbow={c_deg[7]:.2f}"
                 )
 
             self.last_log_t = now

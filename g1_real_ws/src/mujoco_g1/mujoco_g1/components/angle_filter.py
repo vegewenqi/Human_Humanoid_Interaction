@@ -35,10 +35,12 @@ class AngleFilter:
         self.limits = {
             "torso_roll": AngleLimits(np.deg2rad(-60.0), np.deg2rad(60.0)),
             "torso_pitch": AngleLimits(np.deg2rad(-60.0), np.deg2rad(60.0)),
-            "l_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
-            "r_sh_roll": AngleLimits(np.deg2rad(0.0), np.deg2rad(140.0)),
-            "l_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(180.0)),
-            "r_el_pitch": AngleLimits(np.deg2rad(0.0), np.deg2rad(180.0)),
+            "l_sh_pitch": AngleLimits(np.deg2rad(-180.0), np.deg2rad(180.0)),
+            "r_sh_pitch": AngleLimits(np.deg2rad(-180.0), np.deg2rad(180.0)),
+            "l_sh_roll": AngleLimits(np.deg2rad(-90.0), np.deg2rad(150.0)),
+            "r_sh_roll": AngleLimits(np.deg2rad(-90.0), np.deg2rad(150.0)),
+            "l_el_pitch": AngleLimits(np.deg2rad(-60.0), np.deg2rad(180.0)),
+            "r_el_pitch": AngleLimits(np.deg2rad(-60.0), np.deg2rad(180.0)),
         }
 
     def _ema(self, name: str, x: float) -> float:
