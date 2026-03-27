@@ -2,6 +2,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
+from sensor_msgs.msg import JointState
 
 
 class G1JointMapperNode(Node):
@@ -116,6 +117,10 @@ class G1JointMapperNode(Node):
         )
         self.pub = self.create_publisher(Float32MultiArray, self.output_topic, 10)
 
+        self.declare_parameter("unsafe_joint_command_topic", "/joint_commands_unsafe")
+        self.unsafe_joint_command_topic = str(self.get_parameter("unsafe_joint_command_topic").value)
+        self.pub_unsafe_jointstate = self.create_publisher(JointState, self.unsafe_joint_command_topic, 10)
+
         self.last_log_time = self.get_clock().now()
 
         self.get_logger().info("G1JointMapperNode started.")
@@ -154,6 +159,37 @@ class G1JointMapperNode(Node):
         out_data = self._maybe_rad_to_deg(q_des)
         out.data = [float(x) for x in out_data]
         self.pub.publish(out)
+
+        # Publish JointState for 8-DoF CBF node
+        q_des_cbf = np.array(
+            [
+                q_des[0],  # waist_roll
+                q_des[1],  # waist_pitch
+                q_des[2],  # left_shoulder_pitch
+                q_des[3],  # left_shoulder_roll
+                q_des[4],  # left_elbow
+                q_des[5],  # right_shoulder_pitch
+                q_des[6],  # right_shoulder_roll
+                q_des[7],  # right_elbow
+            ],
+            dtype=np.float64,
+        )
+        msg_js = JointState()
+        msg_js.header.stamp = self.get_clock().now().to_msg()
+        msg_js.name = [
+            "waist_roll_joint",
+            "waist_pitch_joint",
+            "left_shoulder_pitch_joint",
+            "left_shoulder_roll_joint",
+            "left_elbow_joint",
+            "right_shoulder_pitch_joint",
+            "right_shoulder_roll_joint",
+            "right_elbow_joint",
+        ]
+        msg_js.position = [float(x) for x in q_des_cbf]
+        msg_js.velocity = []
+        msg_js.effort = []
+        self.pub_unsafe_jointstate.publish(msg_js)
 
         now = self.get_clock().now()
         if (now - self.last_log_time).nanoseconds * 1e-9 > 1.0:
