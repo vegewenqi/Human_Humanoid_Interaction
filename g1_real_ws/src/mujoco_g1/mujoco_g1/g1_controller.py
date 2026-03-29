@@ -5,6 +5,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
+from sensor_msgs.msg import JointState
 
 import mujoco
 import mujoco.viewer
@@ -34,6 +35,7 @@ class G1ActuatorController(Node):
         # ---------------- params ----------------
         self.declare_parameter("mjcf_path", "/repos/unitree_g1/g1_mjx.xml")
         self.declare_parameter("qdes_topic", "/g1_upperbody_q_des")
+        self.declare_parameter("joint_state_topic", "/joint_states")
         self.declare_parameter("qdes_in_degrees", False)
 
         self.declare_parameter("sim_dt", 1.0 / 250.0)
@@ -87,6 +89,7 @@ class G1ActuatorController(Node):
             raise RuntimeError("mjcf_path is required")
 
         self.qdes_topic = str(self.get_parameter("qdes_topic").value)
+        self.joint_state_topic = str(self.get_parameter("joint_state_topic").value)
         self.qdes_in_degrees = bool(self.get_parameter("qdes_in_degrees").value)
 
         self.sim_dt = float(self.get_parameter("sim_dt").value)
@@ -119,8 +122,13 @@ class G1ActuatorController(Node):
         self.q_cmd: Optional[np.ndarray] = None
         self.last_log_t = time.time()
 
+        # topic for nominal q_des array
         self.create_subscription(
             Float32MultiArray, self.qdes_topic, self._on_qdes, 10
+        )
+        # topic for joint states as JointState for CBF node
+        self.pub_joint_states = self.create_publisher(
+            JointState, self.joint_state_topic, 10
         )
 
         # ---------------- MuJoCo ----------------
@@ -261,6 +269,24 @@ class G1ActuatorController(Node):
         q_des = np.clip(q_des, self.q_min, self.q_max)
         self.latest_q_des = q_des
 
+    def _publish_joint_states(self):
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = list(self.joint_names)
+
+        q_now = self.data.qpos[self.qpos_ids].copy()
+        msg.position = [float(x) for x in q_now]
+
+        # Hinge joint velocities are available in qvel at dof addresses.
+        v_now = []
+        for jid in self.joint_ids:
+            dof_adr = int(self.model.jnt_dofadr[jid])
+            v_now.append(float(self.data.qvel[dof_adr]))
+        msg.velocity = v_now
+
+        msg.effort = []
+        self.pub_joint_states.publish(msg) 
+
     def _loop(self):
         if self.latest_q_des is None:
             self._step_only()
@@ -293,6 +319,9 @@ class G1ActuatorController(Node):
         # lock base again after stepping, for extra stability
         self._apply_base_lock()
         mujoco.mj_forward(self.model, self.data)
+
+        # publish JointState for CBF node
+        self._publish_joint_states()
 
         if self.viewer.is_running():
             self.viewer.sync()

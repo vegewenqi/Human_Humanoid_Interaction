@@ -23,7 +23,8 @@ class G1JointMapperNode(Node):
 
         # topic names
         self.declare_parameter("input_topic", "/human_joint_angles_delta")
-        self.declare_parameter("output_topic", "/g1_upperbody_q_des")
+        self.declare_parameter("output_topic", "/g1_upperbody_q_des")  # nominal (unsafe) q_des array
+        self.declare_parameter("unsafe_joint_command_topic", "/joint_commands_unsafe") # unsafe q_des as JointState for CBF node
 
         # units
         self.declare_parameter("input_in_degrees", True)
@@ -88,6 +89,7 @@ class G1JointMapperNode(Node):
 
         self.input_topic = str(self.get_parameter("input_topic").value)
         self.output_topic = str(self.get_parameter("output_topic").value)
+        self.unsafe_joint_command_topic = str(self.get_parameter("unsafe_joint_command_topic").value)
         self.input_in_degrees = bool(self.get_parameter("input_in_degrees").value)
         self.output_in_degrees = bool(self.get_parameter("output_in_degrees").value)
         self.log_output = str(self.get_parameter("log_output").value).strip().lower()
@@ -116,10 +118,9 @@ class G1JointMapperNode(Node):
             Float32MultiArray, self.input_topic, self.on_delta_angles, 10
         )
         self.pub = self.create_publisher(Float32MultiArray, self.output_topic, 10)
-
-        self.declare_parameter("unsafe_joint_command_topic", "/joint_commands_unsafe")
-        self.unsafe_joint_command_topic = str(self.get_parameter("unsafe_joint_command_topic").value)
-        self.pub_unsafe_jointstate = self.create_publisher(JointState, self.unsafe_joint_command_topic, 10)
+        self.pub_unsafe_jointstate = self.create_publisher(
+            JointState, self.unsafe_joint_command_topic, 10
+        )
 
         self.last_log_time = self.get_clock().now()
 
