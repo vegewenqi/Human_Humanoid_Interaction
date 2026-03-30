@@ -26,6 +26,7 @@ setup(
             'human_angle_estimator = mujoco_g1.human_angle_estimator:main',
             'g1_joint_mapper = mujoco_g1.g1_joint_mapper:main',
             'g1_controller = mujoco_g1.g1_controller:main',
+            'jointstate_to_array_qdes = mujoco_g1.jointstate_to_array_qdes:main',
         ],
     },
 )

@@ -1,0 +1,20 @@
+g1_cbf_node:
+  ros__parameters:
+    use_gpu: false
+    
+    dt: 0.02
+    collision_geometry: "capsules" #or capsules or 'boxes'
+    
+    #capsule margin
+    margin_phi: 0.001 #[m^2], related to minimum squared distance
+
+    #box margin (capsule/box don't use same method, so scales not the same)
+    beta: 1.05 #[scalar] related to minimum scaling factor
+
+    #cbf constant
+    gamma: 5.0
+
+    #speed gain
+    K: 5.0
+    max_velocity: 1.0
+    lpf_gain: 0.0
