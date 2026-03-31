@@ -32,8 +32,7 @@ def generate_launch_description():
     ])
 
     rviz_config = PathJoinSubstitution([
-        FindPackageShare("mujoco_g1"),
-        "mujoco_g1",
+        FindPackageShare("g1_cbf"),
         "rviz",
         "config.rviz",
     ])
