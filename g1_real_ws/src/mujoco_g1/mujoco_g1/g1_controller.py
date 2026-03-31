@@ -285,7 +285,7 @@ class G1ActuatorController(Node):
         msg.velocity = v_now
 
         msg.effort = []
-        self.pub_joint_states.publish(msg) 
+        self.pub_joint_states.publish(msg)
 
     def _loop(self):
         if self.latest_q_des is None:
@@ -363,7 +363,7 @@ class G1ActuatorController(Node):
         mujoco.mj_step(self.model, self.data)
         self._apply_base_lock()
         mujoco.mj_forward(self.model, self.data)
-
+        self._publish_joint_states()
         if self.viewer.is_running():
             self.viewer.sync()
 
