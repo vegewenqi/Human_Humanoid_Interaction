@@ -6,6 +6,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 from sensor_msgs.msg import JointState
+from .components.mujoco_29dof_urdf_indices import FULL_JOINT_MAP
 
 import mujoco
 import mujoco.viewer
@@ -190,6 +191,40 @@ class G1ActuatorController(Node):
         self.get_logger().info(f"Controlled qpos ids: {self.qpos_ids.tolist()}")
         self.get_logger().info(f"Controlled actuator ids: {self.actuator_ids.tolist()}")
 
+        # ---------------- full 29-DoF joint-state publishing ----------------
+        self.full_joint_names = [
+            name for name, _ in sorted(FULL_JOINT_MAP.items(), key=lambda kv: kv[1])
+        ]
+
+        self.full_joint_ids = []
+        self.full_qpos_ids = []
+        self.full_dof_ids = []
+
+        for name in self.full_joint_names:
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if jid < 0:
+                raise RuntimeError(f"Full joint '{name}' not found in MJCF")
+
+            if self.model.jnt_type[jid] != mujoco.mjtJoint.mjJNT_HINGE:
+                raise RuntimeError(
+                    f"Full joint '{name}' is not a hinge joint; "
+                    "full joint-state publishing assumes hinge joints only."
+                )
+
+            self.full_joint_ids.append(jid)
+            self.full_qpos_ids.append(int(self.model.jnt_qposadr[jid]))
+            self.full_dof_ids.append(int(self.model.jnt_dofadr[jid]))
+
+        self.full_qpos_ids = np.asarray(self.full_qpos_ids, dtype=np.int32)
+        self.full_dof_ids = np.asarray(self.full_dof_ids, dtype=np.int32)
+
+        self.get_logger().info(
+            f"Full joint-state publishing enabled with {len(self.full_joint_names)} joints."
+        )
+        self.get_logger().info(
+            f"Full joint-state names: {self.full_joint_names}"
+        )
+
         # initialize all actuators to current qpos to avoid weird targets
         self._initialize_full_ctrl()
 
@@ -212,6 +247,9 @@ class G1ActuatorController(Node):
         )
 
         self.timer = self.create_timer(self.ctrl_dt, self._loop)
+        # publish one full joint-state immediately so downstream nodes
+        # (CBF / robot_state_publisher / RViz) do not wait for first timer tick
+        self._publish_joint_states()
 
         self.get_logger().info(
             f"Started G1ActuatorController: qdes_topic={self.qdes_topic}, "
@@ -272,17 +310,15 @@ class G1ActuatorController(Node):
     def _publish_joint_states(self):
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = list(self.joint_names)
+        msg.name = list(self.full_joint_names)
 
-        q_now = self.data.qpos[self.qpos_ids].copy()
+        # Publish full 29-DoF current MuJoCo joint positions
+        q_now = self.data.qpos[self.full_qpos_ids].copy()
         msg.position = [float(x) for x in q_now]
 
-        # Hinge joint velocities are available in qvel at dof addresses.
-        v_now = []
-        for jid in self.joint_ids:
-            dof_adr = int(self.model.jnt_dofadr[jid])
-            v_now.append(float(self.data.qvel[dof_adr]))
-        msg.velocity = v_now
+        # Publish full 29-DoF current MuJoCo joint velocities
+        v_now = self.data.qvel[self.full_dof_ids].copy()
+        msg.velocity = [float(x) for x in v_now]
 
         msg.effort = []
         self.pub_joint_states.publish(msg)
