@@ -18,6 +18,7 @@ def generate_launch_description():
     unsafe_joint_command_topic = LaunchConfiguration("unsafe_joint_command_topic")
     joint_state_topic = LaunchConfiguration("joint_state_topic")
     safe_joint_command_topic = LaunchConfiguration("safe_joint_command_topic")
+    ghost_joint_state_topic = LaunchConfiguration("ghost_joint_state_topic")
 
     g1_cbf_params = PathJoinSubstitution([
     FindPackageShare("g1_cbf"),
@@ -73,6 +74,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "safe_joint_command_topic",
             default_value="/joint_commands"
+        ),
+        DeclareLaunchArgument(
+            "ghost_joint_state_topic", 
+            default_value="/ghost/joint_states"
         ),
 
         # 1) Human angle estimator
@@ -163,12 +168,7 @@ def generate_launch_description():
         GroupAction(
             condition=IfCondition(ghost),
             actions=[
-                Node(
-                    package="g1_cbf",
-                    executable="ghost_publisher_node",
-                    name="ghost_publisher_node",
-                    output="screen",
-                ),
+                # Full robot_state_publisher for real robot
                 Node(
                     package="robot_state_publisher",
                     executable="robot_state_publisher",
@@ -178,9 +178,22 @@ def generate_launch_description():
                         "robot_description": Command(["cat ", urdf_file]),
                     }],
                     remappings=[
-                        ("joint_states", "/joint_states"),
+                        ("joint_states", joint_state_topic),
                     ],
                 ),
+                # Ghost robot publisher for nominal (unsafe) commands
+                Node(
+                    package="g1_cbf",
+                    executable="ghost_publisher_node",
+                    name="ghost_publisher_node",
+                    output="screen",
+                    parameters=[{
+                        "joint_state_topic": joint_state_topic,
+                        "unsafe_topic": unsafe_joint_command_topic,
+                        "ghost_topic": ghost_joint_state_topic,
+                    }],
+                ),
+
                 Node(
                     package="robot_state_publisher",
                     executable="robot_state_publisher",
@@ -191,7 +204,7 @@ def generate_launch_description():
                         "frame_prefix": "ghost/",
                     }],
                     remappings=[
-                        ("joint_states", "/ghost/joint_states"),
+                        ("joint_states", ghost_joint_state_topic),
                     ],
                 ),
             ],
