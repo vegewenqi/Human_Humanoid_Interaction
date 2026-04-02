@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(unitree_hg REQUIRED)
 
 include_directories(
@@ -21,6 +22,7 @@ add_executable(g1_arm_sdk_bridge
 ament_target_dependencies(g1_arm_sdk_bridge
   rclcpp
   std_msgs
+  sensor_msgs
   unitree_hg
 )
 
