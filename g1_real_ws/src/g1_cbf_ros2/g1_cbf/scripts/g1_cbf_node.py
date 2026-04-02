@@ -37,6 +37,10 @@ class G1CBFNode(Node):
         self.declare_parameter('urdf_path', '')
         self.declare_parameter('collision_geometry', 'capsules')
         self.declare_parameter('use_gpu', False)
+        self.declare_parameter('joint_state_topic', '/joint_states')
+        self.declare_parameter('unsafe_cmd_topic', '/joint_commands_unsafe')
+        self.declare_parameter('safe_cmd_topic', '/joint_commands')
+        self.declare_parameter('obstacle_topic', '/bbox_3d')
 
         # Set JAX config before importing cbf module
         use_gpu = self.get_parameter('use_gpu').value
@@ -48,6 +52,10 @@ class G1CBFNode(Node):
         gamma = self.get_parameter('gamma').value
         urdf_path = self.get_parameter('urdf_path').value
         self.geom_type = self.get_parameter('collision_geometry').value
+        joint_state_topic = self.get_parameter('joint_state_topic').value
+        unsafe_cmd_topic = self.get_parameter('unsafe_cmd_topic').value
+        safe_cmd_topic = self.get_parameter('safe_cmd_topic').value
+        obstacle_topic = self.get_parameter('obstacle_topic').value
 
         if not urdf_path:
             self.get_logger().fatal('urdf_path parameter is required')
@@ -103,27 +111,29 @@ class G1CBFNode(Node):
 
         # Subscribers
         self.create_subscription(
-            JointState, '/joint_states',
+            JointState, joint_state_topic,
             self._joint_states_cb, 10,
         )
         self.create_subscription(
-            JointState, '/joint_commands_unsafe',
+            JointState, unsafe_cmd_topic,
             self._unsafe_cmd_cb, 10,
         )
         # self.create_subscription(
-        #     Detection3DArray, '/bbox_3d',
+        #     Detection3DArray, obstacle_topic,
         #     self._bbox_cb, 10,
         # )
 
         # Publisher
         self.cmd_pub = self.create_publisher(
-            JointState, '/joint_commands', 10,
+            JointState, safe_cmd_topic, 10,
         )
 
         # Timer
         self.create_timer(dt, self._tick)
 
         self.get_logger().info(
+            f'topics: state={joint_state_topic}, unsafe={unsafe_cmd_topic}, '
+            f'safe={safe_cmd_topic}, obstacle={obstacle_topic} '
             f'g1_cbf_node ready — publishing at {1.0/dt:.0f} Hz'
         )
 

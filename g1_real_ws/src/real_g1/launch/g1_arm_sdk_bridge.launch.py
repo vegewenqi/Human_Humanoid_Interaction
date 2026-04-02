@@ -10,7 +10,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'network_interface': 'enx98ded0145852',
-                'qdes_topic': '/g1_upperbody_q_des',
+
+                'qdes_topic': '/g1_upperbody_q_des_safe',
+                'joint_state_topic': '/joint_states',
                 'qdes_in_degrees': False,
 
                 'control_dt': 0.02,
@@ -33,10 +35,12 @@ def generate_launch_description():
                 'tau_ff': 0.0,
                 'weight_active': 1.0,
                 'shutdown_release_sec': 2.0,
-                
-                'q_home_6': [0.0, 0.0, 0.0, 1.5708, 0.0, 1.5708],
-                'q_min_6': [-0.52, -0.52, 0.0, -1.0472, -2.2515, -1.0472],
-                'q_max_6': [0.52, 0.52, 2.2515, 2.0944, 0.0, 2.0944],
+
+                # 8-DoF input order:
+                # [waist_roll, waist_pitch, l_sh_pitch, l_sh_roll, l_elbow, r_sh_pitch, r_sh_roll, r_elbow]
+                'q_home_8': [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708],
+                'q_min_8': [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472],
+                'q_max_8': [0.52, 0.52,  2.6704,  2.2515,  2.0944,  2.6704,  1.5882,  2.0944],
             }]
         )
     ])

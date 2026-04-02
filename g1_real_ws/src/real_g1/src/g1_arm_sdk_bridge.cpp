@@ -9,6 +9,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
 
 #include "unitree_hg/msg/low_cmd.hpp"
 #include "unitree_hg/msg/low_state.hpp"
@@ -18,8 +19,43 @@ using namespace std::chrono_literals;
 
 using LowCmd = unitree_hg::msg::LowCmd;
 using LowState = unitree_hg::msg::LowState;
+using JointState = sensor_msgs::msg::JointState;
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr int G1_NUM_MOTOR = 29;
+// Full 29-DoF URDF joint name order aligned with Unitree motor index
+static const std::array<std::string, G1_NUM_MOTOR> kFullJointNames = {
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint"
+};
+
 
 class G1ArmSdkBridge : public rclcpp::Node {
  public:
@@ -28,8 +64,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
   G1ArmSdkBridge() : Node("g1_arm_sdk_bridge") {
     // ---------------- parameters ----------------
-    this->declare_parameter<std::string>("qdes_topic", "/g1_upperbody_q_des");
+    this->declare_parameter<std::string>("qdes_topic", "/g1_upperbody_q_des_safe");
     this->declare_parameter<bool>("qdes_in_degrees", false);
+    this->declare_parameter<std::string>("joint_state_topic", "/joint_states");
 
     this->declare_parameter<double>("control_dt", 0.02);
     this->declare_parameter<double>("ema_alpha", 0.10);
@@ -69,6 +106,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
     qdes_topic_ = this->get_parameter("qdes_topic").as_string();
     qdes_in_degrees_ = this->get_parameter("qdes_in_degrees").as_bool();
+    joint_state_topic_ = this->get_parameter("joint_state_topic").as_string();
 
     control_dt_ = this->get_parameter("control_dt").as_double();
     ema_alpha_ = this->get_parameter("ema_alpha").as_double();
@@ -149,6 +187,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
     weight_ = 0.0F;
 
     pub_arm_sdk_ = this->create_publisher<LowCmd>("/arm_sdk", 10);
+    pub_joint_states_ = this->create_publisher<JointState>(joint_state_topic_, 10);
 
     sub_lowstate_ = this->create_subscription<LowState>(
         "/lowstate", 10,
@@ -170,6 +209,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
     RCLCPP_INFO(this->get_logger(), "Pure ROS2 G1ArmSdkBridge started.");
     RCLCPP_INFO(this->get_logger(), "qdes_topic = %s", qdes_topic_.c_str());
+    RCLCPP_INFO(this->get_logger(), "joint_state_topic = %s", joint_state_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "control_dt = %.4f", control_dt_);
     RCLCPP_INFO(this->get_logger(), "auto_move_to_home = %s", auto_move_to_home_ ? "true" : "false");
     RCLCPP_INFO(this->get_logger(), "hold_uncontrolled_joints_at_start_pose = %s",
@@ -287,7 +327,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
   void OnQdes(const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
     if (msg->data.size() != 8) {
       RCLCPP_WARN(this->get_logger(),
-                  "Expected /g1_upperbody_q_des dim=8, got %zu",
+                  "Expected q_des dim=8, got %zu",
                   msg->data.size());
       return;
     }
@@ -335,6 +375,27 @@ class G1ArmSdkBridge : public rclcpp::Node {
       RCLCPP_INFO(this->get_logger(),
                   "Received first /lowstate. Bridge initialized from current measured pose.");
     }
+
+    PublishJointStateFromLowState(*msg);
+  }
+
+  void PublishJointStateFromLowState(const LowState &msg) {
+    JointState js;
+    js.header.stamp = this->get_clock()->now();
+
+    js.name.reserve(G1_NUM_MOTOR);
+    js.position.reserve(G1_NUM_MOTOR);
+    js.velocity.reserve(G1_NUM_MOTOR);
+    js.effort.reserve(G1_NUM_MOTOR);
+
+    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+      js.name.push_back(kFullJointNames[i]);
+      js.position.push_back(static_cast<double>(msg.motor_state[i].q));
+      js.velocity.push_back(static_cast<double>(msg.motor_state[i].dq));
+      js.effort.push_back(static_cast<double>(msg.motor_state[i].tau_est));
+    }
+
+    pub_joint_states_->publish(js);
   }
 
   std::vector<double> ExtractInput8FromMeasured17(
@@ -624,6 +685,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
  private:
   rclcpp::Publisher<LowCmd>::SharedPtr pub_arm_sdk_;
+  rclcpp::Publisher<JointState>::SharedPtr pub_joint_states_;
   rclcpp::Subscription<LowState>::SharedPtr sub_lowstate_;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr sub_qdes_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -632,6 +694,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
   std::mutex shutdown_mtx_;
 
   std::string qdes_topic_;
+  std::string joint_state_topic_;
   bool qdes_in_degrees_;
   bool use_weight_ramp_;
   bool hold_uncontrolled_joints_at_start_pose_;
