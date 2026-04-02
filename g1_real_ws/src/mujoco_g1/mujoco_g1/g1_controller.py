@@ -17,7 +17,7 @@ class G1ActuatorController(Node):
     Fixed-base actuator-driven upper-body controller for G1.
 
     Input topic:
-        /g1_upperbody_q_des   Float32MultiArray
+        /g1_upperbody_q_des_safe   Float32MultiArray
         order:
         [waist_roll, waist_pitch, left_shoulder_pitch, left_shoulder_roll, left_elbow, right_shoulder_pitch, right_shoulder_roll, right_elbow]
 
@@ -35,7 +35,7 @@ class G1ActuatorController(Node):
 
         # ---------------- params ----------------
         self.declare_parameter("mjcf_path", "/repos/unitree_g1/g1_mjx.xml")
-        self.declare_parameter("qdes_topic", "/g1_upperbody_q_des")
+        self.declare_parameter("qdes_topic", "/g1_upperbody_q_des_safe")
         self.declare_parameter("joint_state_topic", "/joint_states")
         self.declare_parameter("qdes_in_degrees", False)
 

@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, Command, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -151,18 +151,18 @@ def generate_launch_description():
             condition=IfCondition(use_cbf),
         ),
 
-        # Node(
-        #     package="mujoco_g1",
-        #     executable="g1_controller",
-        #     name="g1_controller_nominal",
-        #     output="screen",
-        #     parameters=[{
-        #         "mjcf_path": mjcf_path,
-        #         "qdes_topic": qdes_nominal_topic,
-        #         "joint_state_topic": joint_state_topic,
-        #     }],
-        #     condition=IfCondition(["not ", use_cbf]),
-        # ),
+        Node(
+            package="mujoco_g1",
+            executable="g1_controller",
+            name="g1_controller_nominal",
+            output="screen",
+            parameters=[{
+                "mjcf_path": mjcf_path,
+                "qdes_topic": qdes_nominal_topic,
+                "joint_state_topic": joint_state_topic,
+            }],
+            condition=UnlessCondition(use_cbf),
+        ),
 
         # 6) Ghost robot for nominal trajectory visualization
         GroupAction(
