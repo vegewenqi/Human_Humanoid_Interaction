@@ -41,12 +41,6 @@ def generate_launch_description():
     # -------- misc params --------
     mjcf_path = LaunchConfiguration("mjcf_path")
 
-    g1_cbf_params = PathJoinSubstitution([
-        FindPackageShare("g1_cbf"),
-        "config",
-        "params.yaml",
-    ])
-
     g1_urdf = PathJoinSubstitution([
         FindPackageShare("g1_description"),
         "urdf",
@@ -173,13 +167,16 @@ def generate_launch_description():
             output="screen",
             condition=sim_cbf_cond,
             parameters=[
-                g1_cbf_params,
                 {
                     "urdf_path": g1_urdf,
                     "joint_state_topic": sim_joint_state_topic,
                     "unsafe_cmd_topic": unsafe_joint_command_topic,
                     "safe_cmd_topic": sim_safe_joint_command_topic,
                     "obstacle_topic": "/sim/bbox_3d",
+                    "collision_geometry": "capsules",
+                    "K": 75.0,
+                    "max_velocity": 0.5,
+                    "lpf_gain": 0.2,
                 }
             ],
         ),
@@ -316,13 +313,16 @@ def generate_launch_description():
             output="screen",
             condition=real_cbf_cond,
             parameters=[
-                g1_cbf_params,
                 {
                     "urdf_path": g1_urdf,
                     "joint_state_topic": real_joint_state_topic,
                     "unsafe_cmd_topic": unsafe_joint_command_topic,
                     "safe_cmd_topic": real_safe_joint_command_topic,
                     "obstacle_topic": "/real/bbox_3d",
+                    "collision_geometry": "capsules",
+                    "K": 75.0,
+                    "max_velocity": 0.5,
+                    "lpf_gain": 0.2,
                 }
             ],
         ),
