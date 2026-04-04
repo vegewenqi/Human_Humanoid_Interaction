@@ -41,6 +41,20 @@ def rotz(deg: float) -> np.ndarray:
     ], dtype=np.float64)
 
 
+def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
+    q = np.array([qx, qy, qz, qw], dtype=np.float64)
+    n = np.linalg.norm(q)
+    if n < 1e-12:
+        return np.eye(3, dtype=np.float64)
+    q = q / n
+    x, y, z, w = q
+    return np.array([
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w),       2.0 * (x * z + y * w)],
+        [2.0 * (x * y + z * w),       1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+        [2.0 * (x * z - y * w),       2.0 * (y * z + x * w),       1.0 - 2.0 * (x * x + y * y)],
+    ], dtype=np.float64)
+
+
 def quat_from_z_to_vec(v: np.ndarray) -> Tuple[float, float, float, float]:
     z_axis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
     v_norm = np.linalg.norm(v)
@@ -69,47 +83,57 @@ def quat_from_z_to_vec(v: np.ndarray) -> Tuple[float, float, float, float]:
 
 class HumanCapsuleFrameTransform(Node):
     """
-    Human-local capsules
-      -> fixed axis alignment
-      -> placement yaw
-      -> placement translation
+    Unified transform node with two modes.
 
-    Formula:
+    mode = "sim":
+      input must be /human_capsules_local
       p_target = R_place * (R_align * p_local) + t_place
 
-    where:
-      - p_local: capsule endpoint in human-local frame (origin at human pelvis,
-                 but axes still inherited from ZED frame)
-      - R_align: fixed axis-alignment rotation from ZED-style local axes to robot pelvis axes
-      - R_place: user-controlled placement yaw for human body orientation in robot frame
-      - t_place: user-controlled human pelvis placement in target frame
+    mode = "real":
+      input must be /human_capsules_zed
+      p_target = R_extrinsic * p_zed + t_extrinsic
+
+    Output topic is unified for downstream CBF:
+      /human_capsules_robot
     """
 
     def __init__(self):
         super().__init__("human_capsule_frame_transform")
 
+        self.declare_parameter("mode", "sim")  # sim | real
+
         self.declare_parameter("input_topic", "/human_capsules_local")
-        self.declare_parameter("output_topic", "/human_capsules_transformed")
-        self.declare_parameter("marker_topic", "/human_capsules_markers_transformed")
+        self.declare_parameter("output_topic", "/human_capsules_robot")
+        self.declare_parameter("marker_topic", "/human_capsules_markers_robot")
         self.declare_parameter("target_frame", "pelvis")
 
-        # Step 1: fixed axis alignment (once you figure out how ZED local axes
-        # relate to robot pelvis axes, keep these fixed)
+        # SIM mode: fixed axis alignment
         self.declare_parameter("align_roll_deg", 0.0)
         self.declare_parameter("align_pitch_deg", 0.0)
         self.declare_parameter("align_yaw_deg", 0.0)
 
-        # Step 2: human placement in target frame
+        # SIM mode: placement of human pelvis in robot frame
         self.declare_parameter("tx", 0.0)
         self.declare_parameter("ty", 0.8)
         self.declare_parameter("tz", 0.0)
         self.declare_parameter("yaw_deg", 0.0)
 
+        # REAL mode: extrinsic T_robot_from_zed
+        self.declare_parameter("extrinsic_tx", 0.0)
+        self.declare_parameter("extrinsic_ty", 0.0)
+        self.declare_parameter("extrinsic_tz", 0.0)
+        self.declare_parameter("extrinsic_qx", 0.0)
+        self.declare_parameter("extrinsic_qy", 0.0)
+        self.declare_parameter("extrinsic_qz", 0.0)
+        self.declare_parameter("extrinsic_qw", 1.0)
+
+        self.mode = str(self.get_parameter("mode").value).strip().lower()
         self.input_topic = str(self.get_parameter("input_topic").value)
         self.output_topic = str(self.get_parameter("output_topic").value)
         self.marker_topic = str(self.get_parameter("marker_topic").value)
         self.target_frame = str(self.get_parameter("target_frame").value)
 
+        # sim params
         self.align_roll_deg = float(self.get_parameter("align_roll_deg").value)
         self.align_pitch_deg = float(self.get_parameter("align_pitch_deg").value)
         self.align_yaw_deg = float(self.get_parameter("align_yaw_deg").value)
@@ -119,17 +143,26 @@ class HumanCapsuleFrameTransform(Node):
         self.tz = float(self.get_parameter("tz").value)
         self.yaw_deg = float(self.get_parameter("yaw_deg").value)
 
-        # R_align: local human axes (inherited from zed) -> robot pelvis axes
         self.R_align = (
             rotz(self.align_yaw_deg) @
             roty(self.align_pitch_deg) @
             rotx(self.align_roll_deg)
         )
-
-        # R_place: additional yaw for where the human faces in robot frame
         self.R_place = rotz(self.yaw_deg)
-
         self.t_place = np.array([self.tx, self.ty, self.tz], dtype=np.float64)
+
+        # real params
+        self.R_extrinsic = quat_to_rot(
+            float(self.get_parameter("extrinsic_qx").value),
+            float(self.get_parameter("extrinsic_qy").value),
+            float(self.get_parameter("extrinsic_qz").value),
+            float(self.get_parameter("extrinsic_qw").value),
+        )
+        self.t_extrinsic = np.array([
+            float(self.get_parameter("extrinsic_tx").value),
+            float(self.get_parameter("extrinsic_ty").value),
+            float(self.get_parameter("extrinsic_tz").value),
+        ], dtype=np.float64)
 
         self.sub_caps = self.create_subscription(
             Float32MultiArray,
@@ -151,21 +184,34 @@ class HumanCapsuleFrameTransform(Node):
         )
 
         self.get_logger().info("HumanCapsuleFrameTransform started.")
+        self.get_logger().info(f"mode         = {self.mode}")
         self.get_logger().info(f"input_topic  = {self.input_topic}")
         self.get_logger().info(f"output_topic = {self.output_topic}")
         self.get_logger().info(f"marker_topic = {self.marker_topic}")
         self.get_logger().info(f"target_frame = {self.target_frame}")
-        self.get_logger().info(
-            f"alignment(deg): roll={self.align_roll_deg:.1f}, pitch={self.align_pitch_deg:.1f}, yaw={self.align_yaw_deg:.1f}"
-        )
-        self.get_logger().info(
-            f"placement: tx={self.tx:.3f}, ty={self.ty:.3f}, tz={self.tz:.3f}, yaw_deg={self.yaw_deg:.1f}"
-        )
 
-    def transform_point(self, p_local: np.ndarray) -> np.ndarray:
-        p_aligned = self.R_align @ p_local
-        p_placed = self.R_place @ p_aligned + self.t_place
-        return p_placed
+        if self.mode == "sim":
+            self.get_logger().info(
+                f"sim alignment(deg): roll={self.align_roll_deg:.1f}, pitch={self.align_pitch_deg:.1f}, yaw={self.align_yaw_deg:.1f}"
+            )
+            self.get_logger().info(
+                f"sim placement: tx={self.tx:.3f}, ty={self.ty:.3f}, tz={self.tz:.3f}, yaw_deg={self.yaw_deg:.1f}"
+            )
+        elif self.mode == "real":
+            self.get_logger().info(
+                f"real extrinsic t=({self.t_extrinsic[0]:.3f}, {self.t_extrinsic[1]:.3f}, {self.t_extrinsic[2]:.3f})"
+            )
+        else:
+            self.get_logger().warn(f"Unknown mode '{self.mode}', expected 'sim' or 'real'.")
+
+    def transform_point(self, p: np.ndarray) -> np.ndarray:
+        if self.mode == "sim":
+            p_aligned = self.R_align @ p
+            return self.R_place @ p_aligned + self.t_place
+        elif self.mode == "real":
+            return self.R_extrinsic @ p + self.t_extrinsic
+        else:
+            return p.copy()
 
     def on_capsules(self, msg: Float32MultiArray):
         data = np.array(msg.data, dtype=np.float64)
@@ -189,12 +235,12 @@ class HumanCapsuleFrameTransform(Node):
                 out[s:s + 7] = block
                 continue
 
-            a_local = block[0:3]
-            b_local = block[3:6]
+            a_in = block[0:3]
+            b_in = block[3:6]
             r = block[6]
 
-            a_t = self.transform_point(a_local)
-            b_t = self.transform_point(b_local)
+            a_t = self.transform_point(a_in)
+            b_t = self.transform_point(b_in)
 
             out[s:s + 7] = np.array([
                 a_t[0], a_t[1], a_t[2],
@@ -237,7 +283,7 @@ class HumanCapsuleFrameTransform(Node):
             m = Marker()
             m.header.stamp = self.get_clock().now().to_msg()
             m.header.frame_id = self.target_frame
-            m.ns = "human_capsules_transformed"
+            m.ns = "human_capsules_robot"
             m.id = i
             m.type = Marker.CYLINDER
             m.action = Marker.ADD
@@ -253,32 +299,32 @@ class HumanCapsuleFrameTransform(Node):
             m.scale.x = 2.0 * r
             m.scale.y = 2.0 * r
             m.scale.z = length
-
+            # ToDo: add the human skeleton line markers for better visualization
             if i == 0:
                 m.color.r = 0.2
                 m.color.g = 0.9
                 m.color.b = 0.2
-                m.color.a = 0.65
+                m.color.a = 0.3
             elif i in [1, 2]:
                 m.color.r = 0.85
                 m.color.g = 0.45
                 m.color.b = 0.35
-                m.color.a = 0.78
+                m.color.a = 0.3
             elif i in [3, 4]:
                 m.color.r = 0.25
                 m.color.g = 0.45
                 m.color.b = 0.95
-                m.color.a = 0.78
+                m.color.a = 0.3
             elif i == 5:
                 m.color.r = 0.9
                 m.color.g = 0.9
                 m.color.b = 0.2
-                m.color.a = 0.72
+                m.color.a = 0.3
             else:
                 m.color.r = 0.45
                 m.color.g = 0.85
                 m.color.b = 0.85
-                m.color.a = 0.72
+                m.color.a = 0.3
 
             ma.markers.append(m)
 

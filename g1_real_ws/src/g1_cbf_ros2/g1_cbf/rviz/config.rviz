@@ -15,6 +15,7 @@ Panels:
         - /Collision Distances1
         - /Collision Distances1/Namespaces1
         - /Obstacle Markers1
+        - /Human Capsules1
       Splitter Ratio: 0.5
     Tree Height: 365
   - Class: rviz_common/Selection
@@ -549,6 +550,18 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /obstacle_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Human Capsules
+      Namespaces:
+        human_capsules_robot: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /human_capsules_markers_robot
       Value: true
   Enabled: true
   Global Options:

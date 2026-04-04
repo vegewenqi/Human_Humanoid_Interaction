@@ -19,13 +19,14 @@ class HumanSkeletonCapsuleNode(Node):
     """
     Build human capsules directly from ZED BODY_38 skeleton points.
 
-    IMPORTANT:
-    This version publishes capsules in HUMAN-LOCAL coordinates,
-    i.e. all capsule endpoints are shifted by the current human pelvis point:
-        p_local = p_world - pelvis_world
+    Publish TWO versions:
+      1) /human_capsules_zed
+         absolute capsule endpoints in the incoming ZED frame
+         (currently the publisher uses frame_id = "zed_world")
 
-    So the output no longer depends on where the person is globally in zed_world.
-    It only preserves human shape / posture around the human pelvis.
+      2) /human_capsules_local
+         human-local capsule endpoints, i.e. endpoints shifted by current human pelvis:
+             p_local = p_zed - p_human_pelvis_zed
 
     Fixed order (7 capsules):
       0 torso
@@ -36,7 +37,7 @@ class HumanSkeletonCapsuleNode(Node):
       5 left_thigh
       6 right_thigh
 
-    Output layout:
+    Capsule flat layout:
       each capsule = [ax, ay, az, bx, by, bz, r]
       total length = 7 * 7 = 49
     """
@@ -56,15 +57,14 @@ class HumanSkeletonCapsuleNode(Node):
 
         self.declare_parameter("min_confidence", 40)
 
-        self.declare_parameter("torso_radius", 0.11)
-        self.declare_parameter("upper_arm_radius", 0.06)
-        self.declare_parameter("forearm_radius", 0.05)
-        self.declare_parameter("thigh_radius", 0.085)
+        self.declare_parameter("torso_radius", 0.1)
+        self.declare_parameter("upper_arm_radius", 0.05)
+        self.declare_parameter("forearm_radius", 0.04)
+        self.declare_parameter("thigh_radius", 0.065)
 
-        # local capsules relative to human pelvis
-        self.declare_parameter("capsule_topic", "/human_capsules_local")
-        # optional: publish current human pelvis position in zed_world, for debugging only
-        self.declare_parameter("pelvis_topic", "/human_pelvis_point")
+        self.declare_parameter("capsule_zed_topic", "/human_capsules_zed")
+        self.declare_parameter("capsule_local_topic", "/human_capsules_local")
+        self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
 
         self.min_confidence = int(self.get_parameter("min_confidence").value)
 
@@ -73,7 +73,8 @@ class HumanSkeletonCapsuleNode(Node):
         self.forearm_radius = float(self.get_parameter("forearm_radius").value)
         self.thigh_radius = float(self.get_parameter("thigh_radius").value)
 
-        self.capsule_topic = str(self.get_parameter("capsule_topic").value)
+        self.capsule_zed_topic = str(self.get_parameter("capsule_zed_topic").value)
+        self.capsule_local_topic = str(self.get_parameter("capsule_local_topic").value)
         self.pelvis_topic = str(self.get_parameter("pelvis_topic").value)
 
         self.latest_conf: Optional[int] = None
@@ -85,8 +86,11 @@ class HumanSkeletonCapsuleNode(Node):
             UInt8, "/skeleton/confidence", self.on_conf, 10
         )
 
-        self.pub_capsules = self.create_publisher(
-            Float32MultiArray, self.capsule_topic, 10
+        self.pub_caps_zed = self.create_publisher(
+            Float32MultiArray, self.capsule_zed_topic, 10
+        )
+        self.pub_caps_local = self.create_publisher(
+            Float32MultiArray, self.capsule_local_topic, 10
         )
         self.pub_pelvis = self.create_publisher(
             Float32MultiArray, self.pelvis_topic, 10
@@ -110,8 +114,9 @@ class HumanSkeletonCapsuleNode(Node):
         }
 
         self.get_logger().info("HumanSkeletonCapsuleNode started.")
-        self.get_logger().info(f"capsule_topic = {self.capsule_topic}")
-        self.get_logger().info(f"pelvis_topic  = {self.pelvis_topic}")
+        self.get_logger().info(f"capsule_zed_topic   = {self.capsule_zed_topic}")
+        self.get_logger().info(f"capsule_local_topic = {self.capsule_local_topic}")
+        self.get_logger().info(f"pelvis_topic        = {self.pelvis_topic}")
 
     def on_conf(self, msg: UInt8):
         self.latest_conf = int(msg.data)
@@ -123,7 +128,7 @@ class HumanSkeletonCapsuleNode(Node):
             return wrist
         return None
 
-    def _build_capsules_world(
+    def _build_capsules_zed(
         self, pts_xyz: np.ndarray
     ) -> Tuple[np.ndarray, Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]]:
         def getp(name: str) -> np.ndarray:
@@ -146,6 +151,7 @@ class HumanSkeletonCapsuleNode(Node):
         l_knee = getp("left_knee")
         r_knee = getp("right_knee")
 
+        # ToDo: maybe forearm defines from elbow to wrist instead of middle fingertip?
         l_hand = self._arm_distal_point(l_wr, l_tip)
         r_hand = self._arm_distal_point(r_wr, r_tip)
 
@@ -182,34 +188,43 @@ class HumanSkeletonCapsuleNode(Node):
 
         return pelvis, caps
 
-    def _publish_local_capsules(
-        self,
-        human_pelvis_world: np.ndarray,
-        caps_world: Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]
-    ):
+    def _caps_to_flat_zed(
+        self, caps_zed: Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]
+    ) -> list:
         arr = []
         for name in self.CAPSULE_ORDER:
-            item = caps_world[name]
+            item = caps_zed[name]
             if item is None:
                 arr.extend([math.nan] * 7)
             else:
                 a, b, r = item
-                a_local = a - human_pelvis_world
-                b_local = b - human_pelvis_world
+                arr.extend([
+                    float(a[0]), float(a[1]), float(a[2]),
+                    float(b[0]), float(b[1]), float(b[2]),
+                    float(r),
+                ])
+        return arr
+
+    def _caps_to_flat_local(
+        self,
+        pelvis_zed: np.ndarray,
+        caps_zed: Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]
+    ) -> list:
+        arr = []
+        for name in self.CAPSULE_ORDER:
+            item = caps_zed[name]
+            if item is None:
+                arr.extend([math.nan] * 7)
+            else:
+                a, b, r = item
+                a_local = a - pelvis_zed
+                b_local = b - pelvis_zed
                 arr.extend([
                     float(a_local[0]), float(a_local[1]), float(a_local[2]),
                     float(b_local[0]), float(b_local[1]), float(b_local[2]),
                     float(r),
                 ])
-
-        msg = Float32MultiArray()
-        msg.data = arr
-        self.pub_capsules.publish(msg)
-
-    def _publish_pelvis_debug(self, pelvis_world: np.ndarray):
-        msg = Float32MultiArray()
-        msg.data = [float(pelvis_world[0]), float(pelvis_world[1]), float(pelvis_world[2])]
-        self.pub_pelvis.publish(msg)
+        return arr
 
     def on_points(self, msg: PointCloud2):
         conf = self.latest_conf if self.latest_conf is not None else -1
@@ -230,12 +245,21 @@ class HumanSkeletonCapsuleNode(Node):
             )
             return
 
-        human_pelvis_world, caps_world = self._build_capsules_world(pts_xyz)
-        if not is_valid_point(human_pelvis_world):
+        pelvis_zed, caps_zed = self._build_capsules_zed(pts_xyz)
+        if not is_valid_point(pelvis_zed):
             return
 
-        self._publish_local_capsules(human_pelvis_world, caps_world)
-        self._publish_pelvis_debug(human_pelvis_world)
+        msg_zed = Float32MultiArray()
+        msg_zed.data = self._caps_to_flat_zed(caps_zed)
+        self.pub_caps_zed.publish(msg_zed)
+
+        msg_local = Float32MultiArray()
+        msg_local.data = self._caps_to_flat_local(pelvis_zed, caps_zed)
+        self.pub_caps_local.publish(msg_local)
+
+        msg_pelvis = Float32MultiArray()
+        msg_pelvis.data = [float(pelvis_zed[0]), float(pelvis_zed[1]), float(pelvis_zed[2])]
+        self.pub_pelvis.publish(msg_pelvis)
 
 
 def main(args=None):

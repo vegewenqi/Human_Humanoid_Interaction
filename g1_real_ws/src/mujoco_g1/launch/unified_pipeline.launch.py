@@ -106,6 +106,62 @@ def generate_launch_description():
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
+        Node(
+            package="mujoco_g1",
+            executable="human_skeleton_capsule",
+            name="human_skeleton_capsule",
+            output="screen",
+            parameters=[{
+                "capsule_zed_topic": "/human_capsules_zed",
+                "capsule_local_topic": "/human_capsules_local",
+            }],
+        ),
+
+        Node(
+            package="mujoco_g1",
+            executable="human_capsule_frame_transform",
+            name="human_capsule_frame_transform",
+            output="screen",
+            parameters=[{
+                "mode": "sim",
+                "input_topic": "/human_capsules_local",
+                "output_topic": "/human_capsules_robot",
+                "marker_topic": "/human_capsules_markers_robot",
+                "target_frame": "pelvis",
+
+                "align_roll_deg": 0.0,
+                "align_pitch_deg": 0.0,
+                "align_yaw_deg": 180.0,
+
+                "tx": 0.0,
+                "ty": 0.8,
+                "tz": 0.0,
+                "yaw_deg": 0.0,
+            }],
+        ),
+
+        # Node(
+        #     package="mujoco_g1",
+        #     executable="human_capsule_frame_transform",
+        #     name="human_capsule_frame_transform",
+        #     output="screen",
+        #     parameters=[{
+        #         "mode": "real",
+        #         "input_topic": "/human_capsules_zed",
+        #         "output_topic": "/human_capsules_robot",
+        #         "marker_topic": "/human_capsules_markers_robot",
+        #         "target_frame": "pelvis",
+
+        #         "extrinsic_tx": 0.0,
+        #         "extrinsic_ty": 0.0,
+        #         "extrinsic_tz": 0.0,
+        #         "extrinsic_qx": 0.0,
+        #         "extrinsic_qy": 0.0,
+        #         "extrinsic_qz": 0.0,
+        #         "extrinsic_qw": 1.0,
+        #     }],
+        # ),
+        
         # ---------------- shared upstream ----------------
         Node(
             package="mujoco_g1",
@@ -175,8 +231,8 @@ def generate_launch_description():
                     "obstacle_topic": "/sim/bbox_3d",
                     "collision_geometry": "capsules",
                     "K": 75.0,
-                    "max_velocity": 0.5,
-                    "lpf_gain": 0.2,
+                    "max_velocity": 10.0,
+                    "lpf_gain": 1.0,
                 }
             ],
         ),
