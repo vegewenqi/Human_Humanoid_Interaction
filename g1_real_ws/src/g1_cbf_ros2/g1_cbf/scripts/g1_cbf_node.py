@@ -152,6 +152,9 @@ class G1CBFNode(Node):
             n_cbf=max_self + max_human + max_box,
         )
 
+        # TODO:
+        # If sim and real CBF nodes run together, split collider/distance
+        # marker topics for sim vs real to avoid mixed visualization.
         self.viz = ColliderVisualizer(
             self, self.kin, geometry_type=self.geom_type,
         )

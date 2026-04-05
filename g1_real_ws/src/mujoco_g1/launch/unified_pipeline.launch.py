@@ -29,11 +29,13 @@ def generate_launch_description():
     sim_joint_state_topic = LaunchConfiguration("sim_joint_state_topic")
     sim_safe_joint_command_topic = LaunchConfiguration("sim_safe_joint_command_topic")
     sim_safe_qdes_topic = LaunchConfiguration("sim_safe_qdes_topic")
+    sim_human_capsule_topic = LaunchConfiguration("sim_human_capsule_topic")
 
     # -------- real topics --------
     real_joint_state_topic = LaunchConfiguration("real_joint_state_topic")
     real_safe_joint_command_topic = LaunchConfiguration("real_safe_joint_command_topic")
     real_safe_qdes_topic = LaunchConfiguration("real_safe_qdes_topic")
+    real_human_capsule_topic = LaunchConfiguration("real_human_capsule_topic")
 
     # -------- ghost topic --------
     ghost_joint_state_topic = LaunchConfiguration("ghost_joint_state_topic")
@@ -68,18 +70,14 @@ def generate_launch_description():
     )
     ghost_cond = IfCondition(
         PythonExpression([
-            "'", run_sim, "' == 'true' and '", 
-            use_cbf, "' == 'true' and '", 
+            "'", run_sim, "' == 'true' and '",
+            use_cbf, "' == 'true' and '",
             ghost, "' == 'true'"
         ])
     )
     rviz_cond = IfCondition(
-        PythonExpression([
-            "'", run_sim, "' == 'true' and '", 
-            use_cbf, "' == 'true' and '", 
-            rviz, "' == 'true'"
-        ])
-    )
+        PythonExpression(["'", rviz, "' == 'true' and '", use_cbf, "' == 'true'"])
+    )  # only launch rviz if we're running cbf in either sim or real, since that's the main use case for visualization
 
     return LaunchDescription([
         # ---------------- launch args ----------------
@@ -99,13 +97,16 @@ def generate_launch_description():
         DeclareLaunchArgument("sim_joint_state_topic", default_value="/sim/joint_states"),
         DeclareLaunchArgument("sim_safe_joint_command_topic", default_value="/sim/joint_commands"),
         DeclareLaunchArgument("sim_safe_qdes_topic", default_value="/sim/g1_upperbody_q_des_safe"),
+        DeclareLaunchArgument("sim_human_capsule_topic", default_value="/sim/human_capsules_robot"),
 
         DeclareLaunchArgument("real_joint_state_topic", default_value="/real/joint_states"),
         DeclareLaunchArgument("real_safe_joint_command_topic", default_value="/real/joint_commands"),
         DeclareLaunchArgument("real_safe_qdes_topic", default_value="/real/g1_upperbody_q_des_safe"),
+        DeclareLaunchArgument("real_human_capsule_topic", default_value="/real/human_capsules_robot"),
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
+        # ---------------- shared human capsule upstream ----------------
         Node(
             package="mujoco_g1",
             executable="human_skeleton_capsule",
@@ -117,16 +118,18 @@ def generate_launch_description():
             }],
         ),
 
+        # ---------------- human capsule transform: sim ----------------
         Node(
             package="mujoco_g1",
             executable="human_capsule_frame_transform",
-            name="human_capsule_frame_transform",
+            name="human_capsule_frame_transform_sim",
             output="screen",
+            condition=IfCondition(run_sim),
             parameters=[{
                 "mode": "sim",
                 "input_topic": "/human_capsules_local",
-                "output_topic": "/human_capsules_robot",
-                "marker_topic": "/human_capsules_markers_robot",
+                "output_topic": sim_human_capsule_topic,
+                "marker_topic": "/sim/human_capsules_markers_robot",
                 "target_frame": "pelvis",
 
                 "align_roll_deg": 0.0,
@@ -140,28 +143,30 @@ def generate_launch_description():
             }],
         ),
 
-        # Node(
-        #     package="mujoco_g1",
-        #     executable="human_capsule_frame_transform",
-        #     name="human_capsule_frame_transform",
-        #     output="screen",
-        #     parameters=[{
-        #         "mode": "real",
-        #         "input_topic": "/human_capsules_zed",
-        #         "output_topic": "/human_capsules_robot",
-        #         "marker_topic": "/human_capsules_markers_robot",
-        #         "target_frame": "pelvis",
+        # ---------------- human capsule transform: real ----------------
+        Node(
+            package="mujoco_g1",
+            executable="human_capsule_frame_transform",
+            name="human_capsule_frame_transform_real",
+            output="screen",
+            condition=IfCondition(run_real),
+            parameters=[{
+                "mode": "real",
+                "input_topic": "/human_capsules_zed",
+                "output_topic": real_human_capsule_topic,
+                "marker_topic": "/real/human_capsules_markers_robot",
+                "target_frame": "pelvis",
 
-        #         "extrinsic_tx": 0.0,
-        #         "extrinsic_ty": 0.0,
-        #         "extrinsic_tz": 0.0,
-        #         "extrinsic_qx": 0.0,
-        #         "extrinsic_qy": 0.0,
-        #         "extrinsic_qz": 0.0,
-        #         "extrinsic_qw": 1.0,
-        #     }],
-        # ),
-        
+                "extrinsic_tx": 0.0,
+                "extrinsic_ty": 0.0,
+                "extrinsic_tz": 0.0,
+                "extrinsic_qx": 0.0,
+                "extrinsic_qy": 0.0,
+                "extrinsic_qz": 0.0,
+                "extrinsic_qw": 1.0,
+            }],
+        ),
+
         # ---------------- shared upstream ----------------
         Node(
             package="mujoco_g1",
@@ -228,7 +233,7 @@ def generate_launch_description():
                     "joint_state_topic": sim_joint_state_topic,
                     "unsafe_cmd_topic": unsafe_joint_command_topic,
                     "safe_cmd_topic": sim_safe_joint_command_topic,
-                    'human_capsule_topic': '/human_capsules_robot',
+                    "human_capsule_topic": sim_human_capsule_topic,
                     "obstacle_topic": "/sim/bbox_3d",
                     "collision_geometry": "capsules",
                     "K": 75.0,
@@ -362,6 +367,24 @@ def generate_launch_description():
             }],
         ),
 
+        # TODO:
+        # If sim and real need to be visualized at the same time,
+        # add frame_prefix for the real robot_state_publisher
+        # to avoid TF/frame name conflicts with sim.
+        Node(
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            name="robot_state_publisher_real_nominal",
+            output="screen",
+            condition=real_nominal_cond,
+            parameters=[{
+                "robot_description": Command(["cat ", g1_urdf]),
+            }],
+            remappings=[
+                ("joint_states", real_joint_state_topic),
+            ],
+        ),
+
         # ---- real cbf ----
         Node(
             package="g1_cbf",
@@ -375,7 +398,7 @@ def generate_launch_description():
                     "joint_state_topic": real_joint_state_topic,
                     "unsafe_cmd_topic": unsafe_joint_command_topic,
                     "safe_cmd_topic": real_safe_joint_command_topic,
-                    'human_capsule_topic': '/human_capsules_robot',
+                    "human_capsule_topic": real_human_capsule_topic,
                     "obstacle_topic": "/real/bbox_3d",
                     "collision_geometry": "capsules",
                     "K": 75.0,
@@ -433,5 +456,19 @@ def generate_launch_description():
                 "q_min_8": [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472],
                 "q_max_8": [0.52, 0.52,  2.6704,  2.2515,  2.0944,  2.6704,  1.5882,  2.0944],
             }],
+        ),
+
+        Node(
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            name="robot_state_publisher_real",
+            output="screen",
+            condition=real_cbf_cond,
+            parameters=[{
+                "robot_description": Command(["cat ", g1_urdf]),
+            }],
+            remappings=[
+                ("joint_states", real_joint_state_topic),
+            ],
         ),
     ])
