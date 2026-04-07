@@ -22,6 +22,8 @@ def generate_launch_description():
     rviz = LaunchConfiguration("rviz")
 
     # -------- shared upstream topics --------
+    skeleton_points_topic = LaunchConfiguration("skeleton_points_topic")
+    skeleton_points_filtered_topic = LaunchConfiguration("skeleton_points_filtered_topic")
     qdes_nominal_topic = LaunchConfiguration("qdes_nominal_topic")
     unsafe_joint_command_topic = LaunchConfiguration("unsafe_joint_command_topic")
 
@@ -91,6 +93,8 @@ def generate_launch_description():
 
         DeclareLaunchArgument("mjcf_path", default_value="/repos/unitree_g1/g1_mjx.xml"),
 
+        DeclareLaunchArgument("skeleton_points_topic", default_value="/skeleton/points"),
+        DeclareLaunchArgument("skeleton_points_filtered_topic", default_value="/skeleton/points_filtered"),
         DeclareLaunchArgument("qdes_nominal_topic", default_value="/g1_upperbody_q_des"),
         DeclareLaunchArgument("unsafe_joint_command_topic", default_value="/joint_commands_unsafe"),
 
@@ -106,13 +110,33 @@ def generate_launch_description():
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
-        # ---------------- shared human capsule upstream ----------------
+        # ---------------- shared ZED skeleton points pre-processor ----------------
+        Node(
+            package="mujoco_g1",
+            executable="zed_skeleton_points_preprocessor",
+            name="zed_skeleton_points_preprocessor",
+            output="screen",
+            parameters=[{
+                "input_points_topic": skeleton_points_topic,
+                "input_conf_topic": "/skeleton/confidence",
+                "output_points_topic": skeleton_points_filtered_topic,
+                "min_confidence": 40,
+                "point_ema_alpha": 1.0,
+                "point_max_jump": 1.0,
+            }],
+        ),
+
+        #---------------- human skeleton capsule ----------------
+                
         Node(
             package="mujoco_g1",
             executable="human_skeleton_capsule",
             name="human_skeleton_capsule",
             output="screen",
             parameters=[{
+                "input_points_topic": skeleton_points_filtered_topic,
+                "input_conf_topic": "/skeleton/confidence",
+                "min_confidence": 40,
                 "capsule_zed_topic": "/human_capsules_zed",
                 "capsule_local_topic": "/human_capsules_local",
             }],
@@ -174,6 +198,11 @@ def generate_launch_description():
             name="human_angle_estimator",
             output="screen",
             condition=IfCondition(run_estimator),
+            parameters=[{
+                "input_points_topic": skeleton_points_filtered_topic,
+                "input_conf_topic": "/skeleton/confidence",
+                "min_confidence": 40,
+            }],
         ),
 
         Node(

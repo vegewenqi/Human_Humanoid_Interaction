@@ -29,6 +29,7 @@ setup(
             'jointstate_to_array_qdes = mujoco_g1.jointstate_to_array_qdes:main',
             'human_skeleton_capsule = mujoco_g1.human_skeleton_capsule:main',
             'human_capsule_frame_transform = mujoco_g1.human_capsule_frame_transform:main',
+            'zed_skeleton_points_preprocessor = mujoco_g1.zed_skeleton_points_preprocessor:main',
         ],
     },
 )

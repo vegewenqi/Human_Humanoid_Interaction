@@ -4,21 +4,21 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import UInt8, Float32MultiArray
 
-from .components.utils import pc2_to_xyz_array
 from .components import zed_indices as zi
 
 
 def is_valid_point(p: np.ndarray) -> bool:
-    return p.shape == (3,) and np.all(np.isfinite(p))
+    return p is not None and p.shape == (3,) and np.all(np.isfinite(p))
 
 
 class HumanSkeletonCapsuleNode(Node):
     """
-    Build human capsules directly from ZED BODY_38 skeleton points.
-
+    Build human capsules from filtered skeleton points published as Float32MultiArray:
+        [x0, y0, z0, x1, y1, z1, ..., xN, yN, zN]
+    Unit of incoming points: meters
+    
     Publish TWO versions:
       1) /human_capsules_zed
          absolute capsule endpoints in the incoming ZED frame
@@ -55,6 +55,9 @@ class HumanSkeletonCapsuleNode(Node):
     def __init__(self):
         super().__init__("human_skeleton_capsule")
 
+        self.declare_parameter("input_points_topic", "/skeleton/points_filtered")
+        self.declare_parameter("input_conf_topic", "/skeleton/confidence")
+
         self.declare_parameter("min_confidence", 40)
 
         self.declare_parameter("torso_radius", 0.1)
@@ -65,6 +68,9 @@ class HumanSkeletonCapsuleNode(Node):
         self.declare_parameter("capsule_zed_topic", "/human_capsules_zed")
         self.declare_parameter("capsule_local_topic", "/human_capsules_local")
         self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
+
+        self.input_points_topic = str(self.get_parameter("input_points_topic").value)
+        self.input_conf_topic = str(self.get_parameter("input_conf_topic").value)
 
         self.min_confidence = int(self.get_parameter("min_confidence").value)
 
@@ -80,10 +86,10 @@ class HumanSkeletonCapsuleNode(Node):
         self.latest_conf: Optional[int] = None
 
         self.sub_points = self.create_subscription(
-            PointCloud2, "/skeleton/points", self.on_points, 10
+            Float32MultiArray, self.input_points_topic, self.on_points, 10
         )
         self.sub_conf = self.create_subscription(
-            UInt8, "/skeleton/confidence", self.on_conf, 10
+            UInt8, self.input_conf_topic, self.on_conf, 10
         )
 
         self.pub_caps_zed = self.create_publisher(
@@ -114,9 +120,10 @@ class HumanSkeletonCapsuleNode(Node):
         }
 
         self.get_logger().info("HumanSkeletonCapsuleNode started.")
-        self.get_logger().info(f"capsule_zed_topic   = {self.capsule_zed_topic}")
-        self.get_logger().info(f"capsule_local_topic = {self.capsule_local_topic}")
-        self.get_logger().info(f"pelvis_topic        = {self.pelvis_topic}")
+        self.get_logger().info(f"input_points_topic   = {self.input_points_topic}")
+        self.get_logger().info(f"capsule_zed_topic    = {self.capsule_zed_topic}")
+        self.get_logger().info(f"capsule_local_topic  = {self.capsule_local_topic}")
+        self.get_logger().info(f"pelvis_topic         = {self.pelvis_topic}")
 
     def on_conf(self, msg: UInt8):
         self.latest_conf = int(msg.data)
@@ -128,30 +135,26 @@ class HumanSkeletonCapsuleNode(Node):
             return wrist
         return None
 
-    def _build_capsules_zed(
-        self, pts_xyz: np.ndarray
+    def _build_capsules_from_points(
+        self, pts: Dict[str, Optional[np.ndarray]]
     ) -> Tuple[np.ndarray, Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]]:
-        def getp(name: str) -> np.ndarray:
-            return pts_xyz[self.index_map[name], :]
+        pelvis = pts.get("pelvis")
+        neck = pts.get("neck")
 
-        pelvis = getp("pelvis")
-        neck = getp("neck")
+        l_sh = pts.get("left_shoulder")
+        r_sh = pts.get("right_shoulder")
+        l_el = pts.get("left_elbow")
+        r_el = pts.get("right_elbow")
+        l_wr = pts.get("left_wrist")
+        r_wr = pts.get("right_wrist")
+        l_tip = pts.get("left_middle_tip")
+        r_tip = pts.get("right_middle_tip")
 
-        l_sh = getp("left_shoulder")
-        r_sh = getp("right_shoulder")
-        l_el = getp("left_elbow")
-        r_el = getp("right_elbow")
-        l_wr = getp("left_wrist")
-        r_wr = getp("right_wrist")
-        l_tip = getp("left_middle_tip")
-        r_tip = getp("right_middle_tip")
+        l_hip = pts.get("left_hip")
+        r_hip = pts.get("right_hip")
+        l_knee = pts.get("left_knee")
+        r_knee = pts.get("right_knee")
 
-        l_hip = getp("left_hip")
-        r_hip = getp("right_hip")
-        l_knee = getp("left_knee")
-        r_knee = getp("right_knee")
-
-        # ToDo: maybe forearm defines from elbow to wrist instead of middle fingertip?
         l_hand = self._arm_distal_point(l_wr, l_tip)
         r_hand = self._arm_distal_point(r_wr, r_tip)
 
@@ -226,26 +229,38 @@ class HumanSkeletonCapsuleNode(Node):
                 ])
         return arr
 
-    def on_points(self, msg: PointCloud2):
+    def on_points(self, msg: Float32MultiArray):
         conf = self.latest_conf if self.latest_conf is not None else -1
         if conf >= 0 and conf < self.min_confidence:
             return
 
-        pts_xyz = pc2_to_xyz_array(msg)
-        if pts_xyz is None or pts_xyz.size == 0:
+        data = np.asarray(msg.data, dtype=np.float64)
+        if data.size == 0 or data.size % 3 != 0:
+            self.get_logger().warn(
+                f"Expected flat xyz array length multiple of 3, got {data.size}",
+                throttle_duration_sec=2.0,
+            )
             return
 
-        pts_xyz = pts_xyz.astype(np.float64)
-        pts_xyz *= 0.001  # mm -> m
+        pts_xyz = data.reshape(-1, 3)
 
         required_max_idx = max(self.index_map.values())
         if pts_xyz.shape[0] <= required_max_idx:
             self.get_logger().warn(
-                f"Received {pts_xyz.shape[0]} points, but need index up to {required_max_idx}."
+                f"Received {pts_xyz.shape[0]} filtered points, but need index up to {required_max_idx}.",
+                throttle_duration_sec=2.0,
             )
             return
 
-        pelvis_zed, caps_zed = self._build_capsules_zed(pts_xyz)
+        pts = {}
+        for name, idx in self.index_map.items():
+            p = np.asarray(pts_xyz[idx], dtype=np.float64)
+            if p.shape != (3,) or not np.all(np.isfinite(p)):
+                pts[name] = None
+            else:
+                pts[name] = p
+
+        pelvis_zed, caps_zed = self._build_capsules_from_points(pts)
         if not is_valid_point(pelvis_zed):
             return
 

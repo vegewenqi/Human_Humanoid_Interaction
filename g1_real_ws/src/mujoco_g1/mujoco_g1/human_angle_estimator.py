@@ -4,11 +4,8 @@ from typing import Optional, List
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import UInt8, Float32MultiArray
 
-from .components.utils import pc2_to_xyz_array
-from .components.human_pose_preprocessor import HumanPosePreprocessor
 from .components.human_angle_estimator_core import HumanAngleEstimatorCore
 from .components.angle_filter import AngleFilter
 from .components import zed_indices as zi
@@ -18,9 +15,10 @@ class HumanAngleEstimatorNode(Node):
     def __init__(self):
         super().__init__("human_angle_estimator")
 
+        self.declare_parameter("input_points_topic", "/skeleton/points_filtered")
+        self.declare_parameter("input_conf_topic", "/skeleton/confidence")
+
         self.declare_parameter("min_confidence", 40)
-        self.declare_parameter("point_ema_alpha", 1.0)
-        self.declare_parameter("point_max_jump", 1.0)  # in meters
         self.declare_parameter("angle_ema_alpha", 1.0)
         self.declare_parameter("angle_max_rate_deg", 360.0)
         self.declare_parameter("publish_deg", True)
@@ -29,6 +27,9 @@ class HumanAngleEstimatorNode(Node):
         self.declare_parameter("enable_neutral_calibration", True)
         self.declare_parameter("neutral_calibration_duration", 10.0)   # seconds
         self.declare_parameter("log_output", "raw")  # "raw" | "delta" | "both"
+
+        self.input_points_topic = str(self.get_parameter("input_points_topic").value)
+        self.input_conf_topic = str(self.get_parameter("input_conf_topic").value)
 
         self.min_confidence = int(self.get_parameter("min_confidence").value)
         self.publish_deg = bool(self.get_parameter("publish_deg").value)
@@ -46,10 +47,6 @@ class HumanAngleEstimatorNode(Node):
             )
             self.log_output = "both"
 
-        self.pre = HumanPosePreprocessor(
-            alpha=float(self.get_parameter("point_ema_alpha").value),
-            max_jump=float(self.get_parameter("point_max_jump").value),
-        )
         self.core = HumanAngleEstimatorCore()
         self.af = AngleFilter(
             alpha=float(self.get_parameter("angle_ema_alpha").value),
@@ -70,10 +67,10 @@ class HumanAngleEstimatorNode(Node):
         }
 
         self.sub_points = self.create_subscription(
-            PointCloud2, "/skeleton/points", self.on_points, 10
+            Float32MultiArray, self.input_points_topic, self.on_points, 10
         )
         self.sub_conf = self.create_subscription(
-            UInt8, "/skeleton/confidence", self.on_conf, 10
+            UInt8, self.input_conf_topic, self.on_conf, 10
         )
 
         self.pub = self.create_publisher(Float32MultiArray, "/human_joint_angles", 10)
@@ -130,17 +127,37 @@ class HumanAngleEstimatorNode(Node):
             f"r_sh_pitch={data[5]:.2f}, r_sh_roll={data[6]:.2f}, r_el_pitch={data[7]:.2f}"
         )
 
-    def on_points(self, msg: PointCloud2):
+    def on_points(self, msg: Float32MultiArray):
         conf = self.latest_conf if self.latest_conf is not None else -1
         if conf >= 0 and conf < self.min_confidence:
             return
 
-        pts_xyz = pc2_to_xyz_array(msg).astype(np.float64)
-        pts_xyz *= 0.001  # mm -> m
-        if pts_xyz is None or pts_xyz.size == 0:
+        data = np.asarray(msg.data, dtype=np.float64)
+        if data.size == 0 or data.size % 3 != 0:
+            self.get_logger().warn(
+                f"Expected flat xyz array length multiple of 3, got {data.size}",
+                throttle_duration_sec=2.0,
+            )
             return
 
-        pts = self.pre.extract_points(pts_xyz, self.index_map)
+        pts_xyz = data.reshape(-1, 3)
+
+        required_max_idx = max(self.index_map.values())
+        if pts_xyz.shape[0] <= required_max_idx:
+            self.get_logger().warn(
+                f"Received {pts_xyz.shape[0]} filtered points, but need index up to {required_max_idx}.",
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        pts = {}
+        for name, idx in self.index_map.items():
+            p = np.asarray(pts_xyz[idx], dtype=np.float64)
+            if p.shape != (3,) or not np.all(np.isfinite(p)):
+                pts[name] = None
+            else:
+                pts[name] = p
+
         angles = self.core.estimate(pts)
         if angles is None:
             return
