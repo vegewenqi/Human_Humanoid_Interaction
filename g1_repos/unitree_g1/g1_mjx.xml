@@ -23,7 +23,7 @@
       <!-- Disable all contacts and use explicit contact pairs. -->
       <geom condim="1" contype="0" conaffinity="0"/>
       <joint frictionloss="0.1" solimplimit="0 0.99 0.01" solreflimit=".008 1"/>
-      <position inheritrange="1" kp="75" kv="2"/>
+      <position inheritrange="1" kp="75" kv="10"/>
 
       <default class="hip">
         <default class="hip_pitch">
