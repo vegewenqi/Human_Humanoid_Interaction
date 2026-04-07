@@ -304,27 +304,27 @@ class HumanCapsuleFrameTransform(Node):
                 m.color.r = 0.2
                 m.color.g = 0.9
                 m.color.b = 0.2
-                m.color.a = 0.3
+                m.color.a = 0.5
             elif i in [1, 2]:
-                m.color.r = 0.85
-                m.color.g = 0.45
-                m.color.b = 0.35
-                m.color.a = 0.3
-            elif i in [3, 4]:
                 m.color.r = 0.25
                 m.color.g = 0.45
                 m.color.b = 0.95
-                m.color.a = 0.3
+                m.color.a = 0.5
+            elif i in [3, 4]:
+                m.color.r = 0.85
+                m.color.g = 0.45
+                m.color.b = 0.35
+                m.color.a = 0.5
             elif i == 5:
-                m.color.r = 0.9
-                m.color.g = 0.9
-                m.color.b = 0.2
-                m.color.a = 0.3
-            else:
                 m.color.r = 0.45
                 m.color.g = 0.85
                 m.color.b = 0.85
-                m.color.a = 0.3
+                m.color.a = 0.5
+            else:
+                m.color.r = 0.9
+                m.color.g = 0.9
+                m.color.b = 0.2
+                m.color.a = 0.5
 
             ma.markers.append(m)
 
