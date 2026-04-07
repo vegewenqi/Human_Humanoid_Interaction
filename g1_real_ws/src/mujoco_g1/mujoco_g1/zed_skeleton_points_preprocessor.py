@@ -32,6 +32,7 @@ class ZedSkeletonPointsPreprocessorNode(Node):
         self.declare_parameter("min_confidence", 40)
         self.declare_parameter("point_ema_alpha", 1.0)
         self.declare_parameter("point_max_jump", 1.0)  # meters
+        self.declare_parameter("point_max_reject_count", 5)
 
         self.input_points_topic = str(self.get_parameter("input_points_topic").value)
         self.input_conf_topic = str(self.get_parameter("input_conf_topic").value)
@@ -40,10 +41,13 @@ class ZedSkeletonPointsPreprocessorNode(Node):
         self.min_confidence = int(self.get_parameter("min_confidence").value)
         self.point_ema_alpha = float(self.get_parameter("point_ema_alpha").value)
         self.point_max_jump = float(self.get_parameter("point_max_jump").value)
+        self.point_max_reject_count = int(self.get_parameter("point_max_reject_count").value)
+
 
         self.pre = HumanPosePreprocessor(
             alpha=self.point_ema_alpha,
             max_jump=self.point_max_jump,
+            max_reject_count=self.point_max_reject_count,
         )
 
         self.latest_conf: Optional[int] = None

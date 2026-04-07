@@ -18,7 +18,7 @@ class HumanSkeletonCapsuleNode(Node):
     Build human capsules from filtered skeleton points published as Float32MultiArray:
         [x0, y0, z0, x1, y1, z1, ..., xN, yN, zN]
     Unit of incoming points: meters
-    
+
     Publish TWO versions:
       1) /human_capsules_zed
          absolute capsule endpoints in the incoming ZED frame
@@ -111,8 +111,6 @@ class HumanSkeletonCapsuleNode(Node):
             "right_elbow": zi.RIGHT_ELBOW,
             "left_wrist": zi.LEFT_WRIST,
             "right_wrist": zi.RIGHT_WRIST,
-            "left_middle_tip": zi.LEFT_MIDDLE_TIP,
-            "right_middle_tip": zi.RIGHT_MIDDLE_TIP,
             "left_hip": zi.LEFT_HIP,
             "right_hip": zi.RIGHT_HIP,
             "left_knee": zi.LEFT_KNEE,
@@ -128,13 +126,6 @@ class HumanSkeletonCapsuleNode(Node):
     def on_conf(self, msg: UInt8):
         self.latest_conf = int(msg.data)
 
-    def _arm_distal_point(self, wrist: np.ndarray, tip: np.ndarray) -> Optional[np.ndarray]:
-        if is_valid_point(tip):
-            return tip
-        if is_valid_point(wrist):
-            return wrist
-        return None
-
     def _build_capsules_from_points(
         self, pts: Dict[str, Optional[np.ndarray]]
     ) -> Tuple[np.ndarray, Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]]]:
@@ -147,16 +138,11 @@ class HumanSkeletonCapsuleNode(Node):
         r_el = pts.get("right_elbow")
         l_wr = pts.get("left_wrist")
         r_wr = pts.get("right_wrist")
-        l_tip = pts.get("left_middle_tip")
-        r_tip = pts.get("right_middle_tip")
 
         l_hip = pts.get("left_hip")
         r_hip = pts.get("right_hip")
         l_knee = pts.get("left_knee")
         r_knee = pts.get("right_knee")
-
-        l_hand = self._arm_distal_point(l_wr, l_tip)
-        r_hand = self._arm_distal_point(r_wr, r_tip)
 
         caps: Dict[str, Optional[Tuple[np.ndarray, np.ndarray, float]]] = {
             "torso": None,
@@ -174,14 +160,14 @@ class HumanSkeletonCapsuleNode(Node):
         if is_valid_point(l_sh) and is_valid_point(l_el):
             caps["left_upper_arm"] = (l_sh, l_el, self.upper_arm_radius)
 
-        if is_valid_point(l_el) and l_hand is not None:
-            caps["left_forearm_hand"] = (l_el, l_hand, self.forearm_radius)
+        if is_valid_point(l_el) and l_wr is not None:
+            caps["left_forearm_hand"] = (l_el, l_wr, self.forearm_radius)
 
         if is_valid_point(r_sh) and is_valid_point(r_el):
             caps["right_upper_arm"] = (r_sh, r_el, self.upper_arm_radius)
 
-        if is_valid_point(r_el) and r_hand is not None:
-            caps["right_forearm_hand"] = (r_el, r_hand, self.forearm_radius)
+        if is_valid_point(r_el) and r_wr is not None:
+            caps["right_forearm_hand"] = (r_el, r_wr, self.forearm_radius)
 
         if is_valid_point(l_hip) and is_valid_point(l_knee):
             caps["left_thigh"] = (l_hip, l_knee, self.thigh_radius)

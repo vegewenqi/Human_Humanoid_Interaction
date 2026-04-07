@@ -121,8 +121,9 @@ def generate_launch_description():
                 "input_conf_topic": "/skeleton/confidence",
                 "output_points_topic": skeleton_points_filtered_topic,
                 "min_confidence": 40,
-                "point_ema_alpha": 1.0,
+                "point_ema_alpha": 0.5,
                 "point_max_jump": 1.0,
+                "point_max_reject_count": 5,
             }],
         ),
 
