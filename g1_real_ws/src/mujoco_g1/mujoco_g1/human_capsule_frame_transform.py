@@ -275,30 +275,44 @@ class HumanCapsuleFrameTransform(Node):
             c = 0.5 * (a + b)
             v = b - a
             length = float(np.linalg.norm(v))
-            if length < 1e-6:
-                continue
-
-            qx, qy, qz, qw = quat_from_z_to_vec(v)
+            is_sphere = length < 1e-6
 
             m = Marker()
             m.header.stamp = self.get_clock().now().to_msg()
             m.header.frame_id = self.target_frame
             m.ns = "human_capsules_robot"
             m.id = i
-            m.type = Marker.CYLINDER
             m.action = Marker.ADD
 
-            m.pose.position.x = float(c[0])
-            m.pose.position.y = float(c[1])
-            m.pose.position.z = float(c[2])
-            m.pose.orientation.x = qx
-            m.pose.orientation.y = qy
-            m.pose.orientation.z = qz
-            m.pose.orientation.w = qw
+            if is_sphere:
+                m.type = Marker.SPHERE
+                m.pose.position.x = float(a[0])
+                m.pose.position.y = float(a[1])
+                m.pose.position.z = float(a[2])
+                m.pose.orientation.x = 0.0
+                m.pose.orientation.y = 0.0
+                m.pose.orientation.z = 0.0
+                m.pose.orientation.w = 1.0
 
-            m.scale.x = 2.0 * r
-            m.scale.y = 2.0 * r
-            m.scale.z = length
+                m.scale.x = 2.0 * r
+                m.scale.y = 2.0 * r
+                m.scale.z = 2.0 * r
+            else:
+                qx, qy, qz, qw = quat_from_z_to_vec(v)
+
+                m.type = Marker.CYLINDER
+                m.pose.position.x = float(c[0])
+                m.pose.position.y = float(c[1])
+                m.pose.position.z = float(c[2])
+                m.pose.orientation.x = qx
+                m.pose.orientation.y = qy
+                m.pose.orientation.z = qz
+                m.pose.orientation.w = qw
+
+                m.scale.x = 2.0 * r
+                m.scale.y = 2.0 * r
+                m.scale.z = length
+
             # ToDo: add the human skeleton line markers for better visualization
             if i == 0:
                 m.color.r = 0.2
@@ -315,15 +329,21 @@ class HumanCapsuleFrameTransform(Node):
                 m.color.g = 0.45
                 m.color.b = 0.35
                 m.color.a = 0.5
-            elif i == 5:
+            elif i in [5, 7]:
                 m.color.r = 0.45
                 m.color.g = 0.85
                 m.color.b = 0.85
                 m.color.a = 0.5
-            else:
+            elif i in [6, 8]:
                 m.color.r = 0.9
                 m.color.g = 0.9
                 m.color.b = 0.2
+                m.color.a = 0.5
+            else:
+                # head sphere
+                m.color.r = 0.95
+                m.color.g = 0.75
+                m.color.b = 0.80
                 m.color.a = 0.5
 
             ma.markers.append(m)

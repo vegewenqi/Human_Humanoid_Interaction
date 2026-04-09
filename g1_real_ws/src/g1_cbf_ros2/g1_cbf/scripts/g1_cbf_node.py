@@ -40,6 +40,9 @@ HUMAN_CAPSULE_NAMES = [
     'right_forearm_hand',
     'left_thigh',
     'right_thigh',
+    'left_shin',
+    'right_shin',
+    'head_sphere',
 ]
 
 ROBOT_HUMAN_COLLISION_PAIRS = [
@@ -47,6 +50,10 @@ ROBOT_HUMAN_COLLISION_PAIRS = [
     ('left_arm', 'right_forearm_hand'),
     ('right_arm', 'left_upper_arm'),
     ('right_arm', 'left_forearm_hand'),
+    ('left_upper_arm', 'right_upper_arm'),
+    ('left_upper_arm', 'right_forearm_hand'),
+    ('right_upper_arm', 'left_upper_arm'),
+    ('right_upper_arm', 'left_forearm_hand'),
     # ('torso', 'right_upper_arm'),
     # ('torso', 'right_forearm_hand'),
     # ('torso', 'left_upper_arm'),

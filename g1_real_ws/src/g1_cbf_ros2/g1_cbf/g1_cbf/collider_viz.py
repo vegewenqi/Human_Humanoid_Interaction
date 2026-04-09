@@ -13,7 +13,9 @@ from std_msgs.msg import ColorRGBA
 _COLORS = {
     'torso': (0.2, 0.8, 0.2, 0.3),
     'left_arm': (0.2, 0.4, 0.9, 0.3),
+    'left_upper_arm': (0.2, 0.4, 0.9, 0.3),
     'right_arm': (0.9, 0.3, 0.2, 0.3),
+    'right_upper_arm': (0.9, 0.3, 0.2, 0.3),
     'left_thigh': (0.2, 0.7, 0.7, 0.3),
     'right_thigh': (0.7, 0.7, 0.2, 0.3),
 }

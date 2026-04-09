@@ -162,7 +162,7 @@ def generate_launch_description():
                 "align_yaw_deg": 180.0,
 
                 "tx": 0.0,
-                "ty": 0.8,
+                "ty": 0.72,
                 "tz": 0.0,
                 "yaw_deg": 0.0,
             }],

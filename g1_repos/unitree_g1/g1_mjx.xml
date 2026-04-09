@@ -129,6 +129,9 @@
     <mesh name="right_wrist_pitch_link" file="right_wrist_pitch_link.STL"/>
     <mesh name="right_wrist_yaw_link" file="right_wrist_yaw_link.STL"/>
     <mesh name="right_rubber_hand" file="right_rubber_hand.STL"/>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4"/>
+    <material name="grid" texture="grid" texrepeat="5 5"/>
   </asset>
 
   <worldbody>
@@ -358,6 +361,7 @@
         </body>
       </body>
     </body>
+    <geom type="plane" size="10 10 0.1" material="grid"/>
   </worldbody>
 
   <actuator>
