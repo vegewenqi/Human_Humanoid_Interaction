@@ -269,6 +269,11 @@ def generate_launch_description():
                     "K": 75.0,
                     "max_velocity": 10.0,
                     "lpf_gain": 1.0,
+                    # "margin_phi": 0.004,
+                    # "beta": 1.05,
+                    # "gamma": 2.5,
+                    # "K": 5.0,
+                    # "enable_human_collision": False
                 }
             ],
         ),
