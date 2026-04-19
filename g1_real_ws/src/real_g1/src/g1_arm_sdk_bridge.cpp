@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <atomic>
+#include <csignal>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
@@ -23,6 +25,7 @@ using JointState = sensor_msgs::msg::JointState;
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr int G1_NUM_MOTOR = 29;
+
 // Full 29-DoF URDF joint name order aligned with Unitree motor index
 static const std::array<std::string, G1_NUM_MOTOR> kFullJointNames = {
     "left_hip_pitch_joint",
@@ -56,7 +59,6 @@ static const std::array<std::string, G1_NUM_MOTOR> kFullJointNames = {
     "right_wrist_yaw_joint"
 };
 
-
 class G1ArmSdkBridge : public rclcpp::Node {
  public:
   static constexpr int NUM_ARM_JOINTS = 17;
@@ -82,8 +84,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
     this->declare_parameter<double>("weight_active", 1.0);
     this->declare_parameter<double>("weight_acquire_rate", 0.20);
-    this->declare_parameter<double>("weight_release_rate", 0.15);
-    this->declare_parameter<double>("shutdown_release_sec", 2.0);
+    this->declare_parameter<double>("weight_release_rate", 0.30);
     this->declare_parameter<bool>("use_weight_ramp", true);
 
     this->declare_parameter<bool>("auto_move_to_home", true);
@@ -123,7 +124,6 @@ class G1ArmSdkBridge : public rclcpp::Node {
     weight_active_ = this->get_parameter("weight_active").as_double();
     weight_acquire_rate_ = this->get_parameter("weight_acquire_rate").as_double();
     weight_release_rate_ = this->get_parameter("weight_release_rate").as_double();
-    shutdown_release_sec_ = this->get_parameter("shutdown_release_sec").as_double();
     use_weight_ramp_ = this->get_parameter("use_weight_ramp").as_bool();
 
     auto_move_to_home_ = this->get_parameter("auto_move_to_home").as_bool();
@@ -181,10 +181,16 @@ class G1ArmSdkBridge : public rclcpp::Node {
     has_qdes_ = false;
     has_lowstate_ = false;
     shutdown_released_ = false;
+    safe_stop_requested_ = false;
+    safe_stop_done_ = false;
+    safe_return_initialized_ = false;
+    safe_return_hold_started_ = false;
     home_initialized_ = false;
     home_reached_ = false;
     qdes_gate_open_ = false;
     weight_ = 0.0F;
+
+    safe_return_target_17_.fill(0.0F);
 
     pub_arm_sdk_ = this->create_publisher<LowCmd>("/arm_sdk", 10);
     pub_joint_states_ = this->create_publisher<JointState>(joint_state_topic_, 10);
@@ -206,6 +212,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
     home_transition_start_time_ = this->now();
     home_hold_start_time_ = this->now();
     track_entry_start_time_ = this->now();
+    safe_return_hold_start_time_ = this->now();
 
     RCLCPP_INFO(this->get_logger(), "Pure ROS2 G1ArmSdkBridge started.");
     RCLCPP_INFO(this->get_logger(), "qdes_topic = %s", qdes_topic_.c_str());
@@ -216,68 +223,59 @@ class G1ArmSdkBridge : public rclcpp::Node {
                 hold_uncontrolled_joints_at_start_pose_ ? "true" : "false");
   }
 
-  void ReleaseControlSafely() {
+  void RequestSafeStop() {
     std::lock_guard<std::mutex> guard(shutdown_mtx_);
-    if (shutdown_released_) {
+    if (safe_stop_requested_) {
       return;
     }
-    shutdown_released_ = true;
+    safe_stop_requested_ = true;
+    safe_stop_done_ = false;
+    RCLCPP_WARN(this->get_logger(),
+                "Ctrl-C detected. Entering SAFE_RETURN before shutdown.");
+  }
 
-    if (!has_lowstate_) {
-      return;
+  bool SafeStopDone() const {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    return safe_stop_done_;
+  }
+
+  void RunSafeReturnStep(const rclcpp::Time &now) {
+    if (!safe_return_initialized_) {
+      current_jpos_des_ = current_jpos_meas_;
+      desired_17_ = current_jpos_meas_;
+
+      safe_return_target_17_ = base_q_17_;
+      ApplyInput8ToDesired17(q_home_8_, base_q_17_, safe_return_target_17_);
+
+      q_target_safe_8_ = q_home_8_;
+      safe_return_initialized_ = true;
+      safe_return_hold_started_ = false;
+
+      RCLCPP_WARN(this->get_logger(),
+                  "SAFE_RETURN started: moving to q_home before release.");
     }
 
-    RCLCPP_WARN(this->get_logger(), "Shutdown detected. Returning smoothly to q_home before release...");
+    desired_17_ = safe_return_target_17_;
+    StepTowardsDesired(shutdown_max_joint_delta_);
 
-    if (timer_) {
-      timer_->cancel();
+    if (use_weight_ramp_) {
+      weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
+                       0.0F, static_cast<float>(weight_active_));
+    } else {
+      weight_ = static_cast<float>(weight_active_);
     }
 
-    std::array<float, NUM_ARM_JOINTS> shutdown_target_17 = base_q_17_;
-    ApplyInput8ToDesired17(q_home_8_, base_q_17_, shutdown_target_17);
+    const double remain = GetMaxAbsError(current_jpos_des_, safe_return_target_17_);
 
-    const int move_steps = std::max(
-        1, static_cast<int>(std::ceil(GetMaxAbsError(current_jpos_des_, shutdown_target_17) /
-                                      std::max(1e-6, shutdown_max_joint_delta_))));
-
-    for (int i = 0; i < move_steps; ++i) {
-      {
-        std::lock_guard<std::mutex> lock(mtx_);
-        desired_17_ = shutdown_target_17;
-        StepTowardsDesired(shutdown_max_joint_delta_);
-        if (use_weight_ramp_) {
-          weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                           0.0F, static_cast<float>(weight_active_));
-        } else {
-          weight_ = static_cast<float>(weight_active_);
-        }
-
-        LowCmd cmd;
-        FillLowCmdFromCurrentDes(cmd);
-        pub_arm_sdk_->publish(cmd);
+    if (remain <= std::max(1e-4, shutdown_max_joint_delta_ * 0.5)) {
+      if (!safe_return_hold_started_) {
+        safe_return_hold_started_ = true;
+        safe_return_hold_start_time_ = now;
+        RCLCPP_WARN(this->get_logger(), "SAFE_RETURN reached q_home. Holding...");
       }
-      rclcpp::sleep_for(sleep_time_);
-    }
 
-    const int hold_steps = std::max(1, static_cast<int>(std::round(shutdown_hold_sec_ / control_dt_)));
-    for (int i = 0; i < hold_steps; ++i) {
-      {
-        std::lock_guard<std::mutex> lock(mtx_);
-        desired_17_ = shutdown_target_17;
-        StepTowardsDesired(shutdown_max_joint_delta_);
-
-        LowCmd cmd;
-        FillLowCmdFromCurrentDes(cmd);
-        pub_arm_sdk_->publish(cmd);
-      }
-      rclcpp::sleep_for(sleep_time_);
-    }
-
-    const int release_steps =
-        std::max(1, static_cast<int>(std::round(shutdown_release_sec_ / control_dt_)));
-    for (int i = 0; i < release_steps; ++i) {
-      {
-        std::lock_guard<std::mutex> lock(mtx_);
+      const double hold_elapsed = (now - safe_return_hold_start_time_).seconds();
+      if (hold_elapsed >= shutdown_hold_sec_) {
         if (use_weight_ramp_) {
           const float delta_w = static_cast<float>(weight_release_rate_ * control_dt_);
           weight_ = ClampF(weight_ - delta_w, 0.0F, static_cast<float>(weight_active_));
@@ -285,22 +283,21 @@ class G1ArmSdkBridge : public rclcpp::Node {
           weight_ = 0.0F;
         }
 
-        LowCmd cmd;
-        FillLowCmdFromCurrentDes(cmd);
-        pub_arm_sdk_->publish(cmd);
+        if (weight_ <= 1e-4F) {
+          weight_ = 0.0F;
+          {
+            std::lock_guard<std::mutex> guard(shutdown_mtx_);
+            safe_stop_done_ = true;
+            safe_stop_requested_ = false;
+            shutdown_released_ = true;
+          }
+          RCLCPP_WARN(this->get_logger(),
+                      "SAFE_RETURN complete. Arm control released.");
+        }
       }
-      rclcpp::sleep_for(sleep_time_);
+    } else {
+      safe_return_hold_started_ = false;
     }
-
-    {
-      std::lock_guard<std::mutex> lock(mtx_);
-      weight_ = 0.0F;
-      LowCmd cmd;
-      FillLowCmdFromCurrentDes(cmd);
-      pub_arm_sdk_->publish(cmd);
-    }
-
-    RCLCPP_WARN(this->get_logger(), "Returned to q_home and released arm control safely.");
   }
 
  private:
@@ -309,7 +306,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
     MOVE_TO_HOME,
     WAIT_FOR_QDES,
     TRACK_ENTRY,
-    TRACK_QDES
+    TRACK_QDES,
+    SAFE_RETURN
   };
 
   static double Clamp(double x, double lo, double hi) {
@@ -420,7 +418,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
                               const std::array<float, NUM_ARM_JOINTS> &base_q17,
                               std::array<float, NUM_ARM_JOINTS> &q17) {
     q17 = base_q17;
-    
+
     q17[0] = static_cast<float>(q8[2]);
     q17[1] = static_cast<float>(q8[3]);
     q17[3] = static_cast<float>(q8[4]);
@@ -452,6 +450,13 @@ class G1ArmSdkBridge : public rclcpp::Node {
   }
 
   BridgeMode GetCurrentMode(bool qdes_fresh) {
+    {
+      std::lock_guard<std::mutex> guard(shutdown_mtx_);
+      if (safe_stop_requested_) {
+        return BridgeMode::SAFE_RETURN;
+      }
+    }
+
     if (!home_initialized_) {
       return BridgeMode::HOLD_CURRENT;
     }
@@ -586,9 +591,12 @@ class G1ArmSdkBridge : public rclcpp::Node {
     double used_max_delta = max_joint_delta_;
     std::vector<double> q_ref_8 = q_target_safe_8_;
 
-    if (mode == BridgeMode::HOLD_CURRENT) {
+    if (mode == BridgeMode::SAFE_RETURN) {
+      RunSafeReturnStep(now);
+    } else if (mode == BridgeMode::HOLD_CURRENT) {
       desired_17_ = current_jpos_meas_;
       weight_ = 0.0F;
+      StepTowardsDesired(used_max_delta);
     } else if (mode == BridgeMode::MOVE_TO_HOME) {
       q_ref_8 = ComputeHomeReference(now);
       q_target_safe_8_ = q_ref_8;
@@ -600,6 +608,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
         weight_ = static_cast<float>(weight_active_);
       }
       ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
+      StepTowardsDesired(used_max_delta);
     } else if (mode == BridgeMode::WAIT_FOR_QDES) {
       q_ref_8 = q_home_8_;
       q_target_safe_8_ = q_ref_8;
@@ -611,6 +620,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
         weight_ = static_cast<float>(weight_active_);
       }
       ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
+      StepTowardsDesired(used_max_delta);
     } else if (mode == BridgeMode::TRACK_ENTRY) {
       used_max_delta = max_joint_delta_;
       q_ref_8 = ComputeTrackEntryReference(now, qdes_fresh);
@@ -622,6 +632,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
         weight_ = static_cast<float>(weight_active_);
       }
       ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
+      StepTowardsDesired(used_max_delta);
     } else {
       q_ref_8 = latest_q_des_8_;
       for (size_t i = 0; i < 8; ++i) {
@@ -636,9 +647,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
         weight_ = static_cast<float>(weight_active_);
       }
       ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
+      StepTowardsDesired(used_max_delta);
     }
-
-    StepTowardsDesired(used_max_delta);
 
     LowCmd cmd;
     FillLowCmdFromCurrentDes(cmd);
@@ -663,10 +673,13 @@ class G1ArmSdkBridge : public rclcpp::Node {
         case BridgeMode::TRACK_QDES:
           mode_str = "track_qdes";
           break;
+        case BridgeMode::SAFE_RETURN:
+          mode_str = "safe_return";
+          break;
       }
       RCLCPP_INFO(
           this->get_logger(),
-          "[bridge] mode=%s gate=%s weight=%.2f fresh=%s | q8_deg: wr=%.1f wp=%.1f lsr=%.1f le=%.1f rsr=%.1f re=%.1f",
+          "[bridge] mode=%s gate=%s weight=%.2f fresh=%s | q8_deg: wr=%.1f wp=%.1f lsp=%.1f lsr=%.1f le=%.1f rsp=%.1f rsr=%.1f re=%.1f",
           mode_str,
           qdes_gate_open_ ? "open" : "closed",
           weight_,
@@ -691,7 +704,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::mutex mtx_;
-  std::mutex shutdown_mtx_;
+  mutable std::mutex shutdown_mtx_;
 
   std::string qdes_topic_;
   std::string joint_state_topic_;
@@ -721,7 +734,6 @@ class G1ArmSdkBridge : public rclcpp::Node {
   double weight_active_;
   double weight_acquire_rate_;
   double weight_release_rate_;
-  double shutdown_release_sec_;
 
   bool auto_move_to_home_;
   double home_hold_sec_;
@@ -748,11 +760,18 @@ class G1ArmSdkBridge : public rclcpp::Node {
   bool has_qdes_;
   bool has_lowstate_;
   bool shutdown_released_;
+  bool safe_stop_requested_{false};
+  bool safe_stop_done_{false};
+  bool safe_return_initialized_{false};
+  bool safe_return_hold_started_{false};
   bool home_initialized_;
   bool home_reached_;
   bool qdes_gate_open_;
   bool track_entry_done_{false};
   float weight_;
+
+  std::array<float, NUM_ARM_JOINTS> safe_return_target_17_{};
+  rclcpp::Time safe_return_hold_start_time_;
 
   rclcpp::Time last_qdes_time_;
   rclcpp::Time last_log_time_;
@@ -762,17 +781,38 @@ class G1ArmSdkBridge : public rclcpp::Node {
 };
 
 int main(int argc, char **argv) {
-  rclcpp::init(argc, argv);
+  rclcpp::InitOptions init_options;
+  init_options.shutdown_on_signal = false;
+  rclcpp::init(argc, argv, init_options);
 
-  auto node = std::make_shared<G1ArmSdkBridge>();
-
-  rclcpp::on_shutdown([node]() {
-    if (node) {
-      node->ReleaseControlSafely();
-    }
+  static std::atomic<bool> g_sigint_requested{false};
+  std::signal(SIGINT, [](int) {
+    g_sigint_requested.store(true);
   });
 
-  rclcpp::spin(node);
+  auto node = std::make_shared<G1ArmSdkBridge>();
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  bool safe_stop_requested = false;
+
+  while (rclcpp::ok()) {
+    executor.spin_some();
+
+    if (g_sigint_requested.load() && !safe_stop_requested) {
+      node->RequestSafeStop();
+      safe_stop_requested = true;
+    }
+
+    if (safe_stop_requested && node->SafeStopDone()) {
+      break;
+    }
+
+    rclcpp::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  executor.cancel();
+  executor.remove_node(node);
   rclcpp::shutdown();
   return 0;
 }
