@@ -1,5 +1,5 @@
 import math
-import threading
+import time
 from typing import Optional, Tuple
 
 import numpy as np
@@ -97,7 +97,7 @@ class HumanCapsuleFrameTransform(Node):
     mode = "real_quick_cali":
       input must be /human_capsules_zed
       subscribe pelvis from /human_pelvis_point_zed
-      after user presses Enter, average first N pelvis frames:
+      after startup_delay_sec, average first N pelvis frames:
           p_pelvis_ref = mean(pelvis_zed[0:N])
       then:
           p_target = R_extrinsic * (p_zed - p_pelvis_ref) + t_extrinsic
@@ -139,7 +139,8 @@ class HumanCapsuleFrameTransform(Node):
 
         # quick calibration params
         self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
-        self.declare_parameter("bootstrap_num_frames", 10)
+        self.declare_parameter("bootstrap_num_frames", 50)
+        self.declare_parameter("startup_delay_sec", 5.0)
 
         self.mode = str(self.get_parameter("mode").value).strip().lower()
         self.input_topic = str(self.get_parameter("input_topic").value)
@@ -180,11 +181,18 @@ class HumanCapsuleFrameTransform(Node):
 
         self.pelvis_topic = str(self.get_parameter("pelvis_topic").value)
         self.bootstrap_num_frames = int(self.get_parameter("bootstrap_num_frames").value)
+        self.startup_delay_sec = float(self.get_parameter("startup_delay_sec").value)
+
         if self.bootstrap_num_frames <= 0:
             self.get_logger().warn(
-                f"bootstrap_num_frames={self.bootstrap_num_frames} invalid, reset to 10"
+                f"bootstrap_num_frames={self.bootstrap_num_frames} invalid, reset to 50"
             )
-            self.bootstrap_num_frames = 10
+            self.bootstrap_num_frames = 50
+        if self.startup_delay_sec < 0.0:
+            self.get_logger().warn(
+                f"startup_delay_sec={self.startup_delay_sec} invalid, reset to 5.0"
+            )
+            self.startup_delay_sec = 5.0
 
         self.sub_caps = self.create_subscription(
             Float32MultiArray,
@@ -207,11 +215,11 @@ class HumanCapsuleFrameTransform(Node):
 
         # quick calibration state
         self.sub_pelvis = None
-        self.bootstrap_lock = threading.Lock()
-        self.bootstrap_start_requested = False
         self.bootstrap_done = False
         self.bootstrap_samples = []
         self.pelvis_ref_zed: Optional[np.ndarray] = None
+        self.quick_cali_start_time: Optional[float] = None
+        self.quick_cali_started = False
 
         if self.mode == "real_quick_cali":
             self.sub_pelvis = self.create_subscription(
@@ -220,7 +228,7 @@ class HumanCapsuleFrameTransform(Node):
                 self.on_pelvis,
                 10,
             )
-            self._start_keyboard_thread()
+            self.quick_cali_start_time = time.time() + self.startup_delay_sec
 
         self.get_logger().info("HumanCapsuleFrameTransform started.")
         self.get_logger().info(f"mode         = {self.mode}")
@@ -250,13 +258,13 @@ class HumanCapsuleFrameTransform(Node):
                 f"real_quick_cali bootstrap_num_frames = {self.bootstrap_num_frames}"
             )
             self.get_logger().info(
+                f"real_quick_cali startup_delay_sec = {self.startup_delay_sec:.2f}"
+            )
+            self.get_logger().info(
                 "real_quick_cali meaning of extrinsic_*: place averaged initial human pelvis into robot pelvis frame."
             )
             self.get_logger().info(
                 f"real_quick_cali placement t=({self.t_extrinsic[0]:.3f}, {self.t_extrinsic[1]:.3f}, {self.t_extrinsic[2]:.3f})"
-            )
-            self.get_logger().info(
-                "Press Enter in terminal to start pelvis averaging."
             )
 
         else:
@@ -264,31 +272,21 @@ class HumanCapsuleFrameTransform(Node):
                 f"Unknown mode '{self.mode}', expected 'sim', 'real_cali', or 'real_quick_cali'."
             )
 
-    def _start_keyboard_thread(self):
-        thread = threading.Thread(target=self._keyboard_loop, daemon=True)
-        thread.start()
-
-    def _keyboard_loop(self):
-        while rclpy.ok() and self.mode == "real_quick_cali":
-            try:
-                input("[human_capsule_frame_transform] Press Enter to start pelvis capture: ")
-            except EOFError:
-                return
-            except Exception:
-                return
-
-            with self.bootstrap_lock:
-                self.bootstrap_samples = []
-                self.bootstrap_start_requested = True
-                self.bootstrap_done = False
-                self.pelvis_ref_zed = None
-
-            self.get_logger().info(
-                f"Started pelvis capture. Collecting {self.bootstrap_num_frames} valid pelvis frames..."
-            )
-
     def on_pelvis(self, msg: Float32MultiArray):
         if self.mode != "real_quick_cali":
+            return
+
+        now = time.time()
+        if self.quick_cali_start_time is None or now < self.quick_cali_start_time:
+            return
+
+        if not self.quick_cali_started:
+            self.quick_cali_started = True
+            self.get_logger().info(
+                f"Startup delay finished. Collecting {self.bootstrap_num_frames} valid pelvis frames..."
+            )
+
+        if self.bootstrap_done:
             return
 
         data = np.array(msg.data, dtype=np.float64)
@@ -299,30 +297,25 @@ class HumanCapsuleFrameTransform(Node):
         if not np.all(np.isfinite(p)):
             return
 
-        with self.bootstrap_lock:
-            if not self.bootstrap_start_requested or self.bootstrap_done:
-                return
+        self.bootstrap_samples.append(p.copy())
+        n = len(self.bootstrap_samples)
 
-            self.bootstrap_samples.append(p.copy())
-            n = len(self.bootstrap_samples)
+        if n == 1 or n == self.bootstrap_num_frames or n % 5 == 0:
+            self.get_logger().info(
+                f"Pelvis capture progress: {n}/{self.bootstrap_num_frames}"
+            )
 
-            if n == 1 or n == self.bootstrap_num_frames or n % 5 == 0:
-                self.get_logger().info(
-                    f"Pelvis capture progress: {n}/{self.bootstrap_num_frames}"
-                )
+        if n >= self.bootstrap_num_frames:
+            stack = np.stack(self.bootstrap_samples, axis=0)
+            self.pelvis_ref_zed = np.mean(stack, axis=0)
+            self.bootstrap_done = True
 
-            if n >= self.bootstrap_num_frames:
-                stack = np.stack(self.bootstrap_samples, axis=0)
-                self.pelvis_ref_zed = np.mean(stack, axis=0)
-                self.bootstrap_done = True
-                self.bootstrap_start_requested = False
-
-                self.get_logger().info(
-                    "Pelvis reference captured from averaged frames: "
-                    f"[{self.pelvis_ref_zed[0]:.4f}, "
-                    f"{self.pelvis_ref_zed[1]:.4f}, "
-                    f"{self.pelvis_ref_zed[2]:.4f}]"
-                )
+            self.get_logger().info(
+                "Pelvis reference captured from averaged frames: "
+                f"[{self.pelvis_ref_zed[0]:.4f}, "
+                f"{self.pelvis_ref_zed[1]:.4f}, "
+                f"{self.pelvis_ref_zed[2]:.4f}]"
+            )
 
     def transform_point(self, p: np.ndarray) -> np.ndarray:
         if self.mode == "sim":
@@ -333,13 +326,9 @@ class HumanCapsuleFrameTransform(Node):
             return self.R_extrinsic @ p + self.t_extrinsic
 
         elif self.mode == "real_quick_cali":
-            with self.bootstrap_lock:
-                pelvis_ref = None if self.pelvis_ref_zed is None else self.pelvis_ref_zed.copy()
-
-            if pelvis_ref is None:
+            if self.pelvis_ref_zed is None:
                 return p.copy()
-
-            return self.R_extrinsic @ (p - pelvis_ref) + self.t_extrinsic
+            return self.R_extrinsic @ (p - self.pelvis_ref_zed) + self.t_extrinsic
 
         else:
             return p.copy()
@@ -356,14 +345,19 @@ class HumanCapsuleFrameTransform(Node):
             return
 
         if self.mode == "real_quick_cali":
-            with self.bootstrap_lock:
-                ready = self.bootstrap_done and (self.pelvis_ref_zed is not None)
-
-            if not ready:
-                self.get_logger().warn(
-                    "real_quick_cali not calibrated yet. Press Enter to start pelvis averaging.",
-                    throttle_duration_sec=2.0,
-                )
+            if not self.bootstrap_done or self.pelvis_ref_zed is None:
+                now = time.time()
+                if self.quick_cali_start_time is not None and now < self.quick_cali_start_time:
+                    remain = self.quick_cali_start_time - now
+                    self.get_logger().warn(
+                        f"real_quick_cali waiting startup delay... {remain:.1f}s remaining.",
+                        throttle_duration_sec=1.0,
+                    )
+                else:
+                    self.get_logger().warn(
+                        "real_quick_cali collecting pelvis frames...",
+                        throttle_duration_sec=1.0,
+                    )
                 return
 
         n_caps = data.size // 7

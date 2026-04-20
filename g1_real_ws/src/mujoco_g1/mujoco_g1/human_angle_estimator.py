@@ -26,6 +26,7 @@ class HumanAngleEstimatorNode(Node):
         # neutral calibration related
         self.declare_parameter("enable_neutral_calibration", True)
         self.declare_parameter("neutral_calibration_duration", 10.0)   # seconds
+        self.declare_parameter("startup_delay_sec", 5.0)
         self.declare_parameter("log_output", "raw")  # "raw" | "delta" | "both"
 
         self.input_points_topic = str(self.get_parameter("input_points_topic").value)
@@ -40,12 +41,20 @@ class HumanAngleEstimatorNode(Node):
         self.neutral_calibration_duration = float(
             self.get_parameter("neutral_calibration_duration").value
         )
+        self.startup_delay_sec = float(
+            self.get_parameter("startup_delay_sec").value
+        )
         self.log_output = str(self.get_parameter("log_output").value).strip().lower()
         if self.log_output not in ["raw", "delta", "both"]:
             self.get_logger().warn(
                 f"Invalid log_output='{self.log_output}', fallback to 'both'."
             )
             self.log_output = "both"
+        if self.startup_delay_sec < 0.0:
+            self.get_logger().warn(
+                f"startup_delay_sec={self.startup_delay_sec} invalid, reset to 5.0"
+            )
+            self.startup_delay_sec = 5.0
 
         self.core = HumanAngleEstimatorCore()
         self.af = AngleFilter(
@@ -85,15 +94,17 @@ class HumanAngleEstimatorNode(Node):
         self.calib_samples: List[np.ndarray] = []
         self.neutral_offset: Optional[np.ndarray] = None
         self.calib_done = not self.enable_neutral_calibration
+        self.calib_ready_to_start_time: Optional[float] = None
+        self.calib_started = False
 
         if self.calib_done:
             self.get_logger().info(
                 "HumanAngleEstimatorNode started. Neutral calibration disabled."
             )
         else:
+            self.calib_ready_to_start_time = time.time() + self.startup_delay_sec
             self.get_logger().info(
-                f"HumanAngleEstimatorNode started. Neutral calibration enabled "
-                f"({self.neutral_calibration_duration:.2f}s). Please stand in neutral pose."
+                f"HumanAngleEstimatorNode started. Neutral calibration will auto-start after {self.startup_delay_sec:.2f}s."
             )
 
     def on_conf(self, msg: UInt8):
@@ -179,8 +190,22 @@ class HumanAngleEstimatorNode(Node):
 
         now = time.time()
 
+        # auto-start calibration after startup delay
+        if (
+            not self.calib_done
+            and not self.calib_started
+            and self.calib_ready_to_start_time is not None
+            and now >= self.calib_ready_to_start_time
+        ):
+            self.calib_started = True
+            self.calib_start_t = now
+            self.calib_samples = []
+            self.get_logger().info(
+                f"Startup delay finished. Neutral calibration started for {self.neutral_calibration_duration:.2f}s. Please stand in neutral pose."
+            )
+
         # neutral calibration
-        if not self.calib_done:
+        if not self.calib_done and self.calib_started:
             if self.calib_start_t is None:
                 self.calib_start_t = now
 
@@ -194,6 +219,7 @@ class HumanAngleEstimatorNode(Node):
                     self.neutral_offset = np.zeros_like(raw_arr)
 
                 self.calib_done = True
+                self.calib_started = False
 
                 neutral_disp = self._convert_unit_for_publish(self.neutral_offset)
                 unit = "deg" if self.publish_deg else "rad"
@@ -225,10 +251,16 @@ class HumanAngleEstimatorNode(Node):
             unit = "deg" if self.publish_deg else "rad"
 
             if not self.calib_done:
-                elapsed = 0.0 if self.calib_start_t is None else (now - self.calib_start_t)
-                self.get_logger().info(
-                    f"Neutral calibrating... {elapsed:.2f}/{self.neutral_calibration_duration:.2f}s"
-                )
+                if not self.calib_started and self.calib_ready_to_start_time is not None and now < self.calib_ready_to_start_time:
+                    remain = self.calib_ready_to_start_time - now
+                    self.get_logger().info(
+                        f"Neutral calibration waiting startup delay... {remain:.1f}s remaining."
+                    )
+                elif self.calib_started:
+                    elapsed = 0.0 if self.calib_start_t is None else (now - self.calib_start_t)
+                    self.get_logger().info(
+                        f"Neutral calibrating... {elapsed:.2f}/{self.neutral_calibration_duration:.2f}s"
+                    )
 
             if self.log_output in ["raw", "both"]:
                 self.get_logger().info(
