@@ -65,7 +65,63 @@ class G1ArmSdkBridge : public rclcpp::Node {
   static constexpr auto NOT_USED_JOINT = G1Arm7JointIndex::NOT_USED_JOINT;
 
   G1ArmSdkBridge() : Node("g1_arm_sdk_bridge") {
-    // ---------------- parameters ----------------
+    DeclareParameters();
+    ReadParameters();
+    InitializeStorage();
+    CreateRosInterfaces();
+    PrintStartupConfig();
+  }
+
+  void RequestSafeStop() {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    if (safe_stop_requested_) {
+      return;
+    }
+    safe_stop_requested_ = true;
+    safe_stop_done_ = false;
+    RCLCPP_WARN(this->get_logger(),
+                "Ctrl-C detected. Entering orderly shutdown sequence.");
+  }
+
+  bool SafeStopDone() const {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    return safe_stop_done_;
+  }
+
+ private:
+  enum class BridgeMode {
+    WAIT_FOR_LOWSTATE,
+    STARTUP_ACQUIRE,
+    STARTUP_MOVE_HOME,
+    STARTUP_HOLD_HOME,
+    WAIT_FOR_QDES,
+    TRACK_ENTRY,
+    TRACK_QDES,
+    SHUTDOWN_MOVE_HOME,
+    SHUTDOWN_HOLD_HOME,
+    SHUTDOWN_RELEASE
+  };
+
+  static constexpr double kPoseArrivalToleranceRad = 2e-3;
+  static constexpr float kWeightDoneEps = 1e-4F;
+
+  static double Clamp(double x, double lo, double hi) {
+    return std::max(lo, std::min(x, hi));
+  }
+
+  static float ClampF(float x, float lo, float hi) {
+    return std::max(lo, std::min(x, hi));
+  }
+
+  static double Lerp(double a, double b, double t) {
+    return a + (b - a) * t;
+  }
+
+  static double Rad2Deg(double rad) {
+    return rad * 180.0 / kPi;
+  }
+
+  void DeclareParameters() {
     this->declare_parameter<std::string>("qdes_topic", "/g1_upperbody_q_des_safe");
     this->declare_parameter<bool>("qdes_in_degrees", false);
     this->declare_parameter<std::string>("joint_state_topic", "/joint_states");
@@ -84,27 +140,27 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
     this->declare_parameter<double>("weight_active", 1.0);
     this->declare_parameter<double>("weight_acquire_rate", 0.20);
-    this->declare_parameter<double>("weight_release_rate", 0.30);
+    this->declare_parameter<double>("weight_release_rate", 0.20);
     this->declare_parameter<bool>("use_weight_ramp", true);
 
     this->declare_parameter<bool>("auto_move_to_home", true);
-    this->declare_parameter<double>("home_transition_velocity", 0.06);
-    this->declare_parameter<double>("home_hold_sec", 4.0);
+    this->declare_parameter<double>("home_transition_velocity", 0.10);
+    this->declare_parameter<double>("home_hold_sec", 0.5);
     this->declare_parameter<double>("track_entry_blend_sec", 2.0);
-    this->declare_parameter<double>("shutdown_return_velocity", 0.06);
-    this->declare_parameter<double>("shutdown_hold_sec", 1.0);
+    this->declare_parameter<double>("shutdown_return_velocity", 0.10);
+    this->declare_parameter<double>("shutdown_hold_sec", 0.5);
 
     this->declare_parameter<bool>("hold_uncontrolled_joints_at_start_pose", true);
 
-    // Input order:
-    // [waist_roll, waist_pitch, l_sh_pitch, l_sh_roll, l_elbow, r_sh_pitch, r_sh_roll, r_elbow]
     this->declare_parameter<std::vector<double>>(
         "q_home_8", {0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708});
     this->declare_parameter<std::vector<double>>(
         "q_min_8", {-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472});
     this->declare_parameter<std::vector<double>>(
         "q_max_8", {0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944});
+  }
 
+  void ReadParameters() {
     qdes_topic_ = this->get_parameter("qdes_topic").as_string();
     qdes_in_degrees_ = this->get_parameter("qdes_in_degrees").as_bool();
     joint_state_topic_ = this->get_parameter("joint_state_topic").as_string();
@@ -147,8 +203,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
     max_joint_delta_ = max_joint_velocity_ * control_dt_;
     home_max_joint_delta_ = home_transition_velocity_ * control_dt_;
     shutdown_max_joint_delta_ = shutdown_return_velocity_ * control_dt_;
-    sleep_time_ = std::chrono::milliseconds(static_cast<int>(control_dt_ * 1000.0));
+  }
 
+  void InitializeStorage() {
     arm_joints_ = {
         G1Arm7JointIndex::LEFT_SHOULDER_PITCH,
         G1Arm7JointIndex::LEFT_SHOULDER_ROLL,
@@ -172,26 +229,26 @@ class G1ArmSdkBridge : public rclcpp::Node {
     current_jpos_meas_.fill(0.0F);
     desired_17_.fill(0.0F);
     base_q_17_.fill(0.0F);
+    home_target_17_.fill(0.0F);
 
     latest_q_des_8_.assign(8, 0.0);
     q_target_safe_8_.assign(8, 0.0);
-    q_home_start_8_.assign(8, 0.0);
-    track_start_8_.assign(8, 0.0);
+    track_entry_start_8_.assign(8, 0.0);
 
     has_qdes_ = false;
     has_lowstate_ = false;
-    shutdown_released_ = false;
     safe_stop_requested_ = false;
     safe_stop_done_ = false;
-    safe_return_initialized_ = false;
-    safe_return_hold_started_ = false;
-    home_initialized_ = false;
-    home_reached_ = false;
-    qdes_gate_open_ = false;
+    startup_snapshot_logged_ = false;
+    phase_ = BridgeMode::WAIT_FOR_LOWSTATE;
     weight_ = 0.0F;
 
-    safe_return_target_17_.fill(0.0F);
+    last_qdes_time_ = this->now();
+    last_log_time_ = this->now();
+    phase_start_time_ = this->now();
+  }
 
+  void CreateRosInterfaces() {
     pub_arm_sdk_ = this->create_publisher<LowCmd>("/arm_sdk", 10);
     pub_joint_states_ = this->create_publisher<JointState>(joint_state_topic_, 10);
 
@@ -206,132 +263,23 @@ class G1ArmSdkBridge : public rclcpp::Node {
     timer_ = this->create_wall_timer(
         std::chrono::duration<double>(control_dt_),
         std::bind(&G1ArmSdkBridge::ControlLoop, this));
+  }
 
-    last_qdes_time_ = this->now();
-    last_log_time_ = this->now();
-    home_transition_start_time_ = this->now();
-    home_hold_start_time_ = this->now();
-    track_entry_start_time_ = this->now();
-    safe_return_hold_start_time_ = this->now();
-
+  void PrintStartupConfig() {
     RCLCPP_INFO(this->get_logger(), "Pure ROS2 G1ArmSdkBridge started.");
     RCLCPP_INFO(this->get_logger(), "qdes_topic = %s", qdes_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "joint_state_topic = %s", joint_state_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "control_dt = %.4f", control_dt_);
     RCLCPP_INFO(this->get_logger(), "auto_move_to_home = %s", auto_move_to_home_ ? "true" : "false");
-    RCLCPP_INFO(this->get_logger(), "hold_uncontrolled_joints_at_start_pose = %s",
-                hold_uncontrolled_joints_at_start_pose_ ? "true" : "false");
-  }
-
-  void RequestSafeStop() {
-    std::lock_guard<std::mutex> guard(shutdown_mtx_);
-    if (safe_stop_requested_) {
-      return;
-    }
-    safe_stop_requested_ = true;
-    safe_stop_done_ = false;
-    RCLCPP_WARN(this->get_logger(),
-                "Ctrl-C detected. Entering SAFE_RETURN before shutdown.");
-  }
-
-  bool SafeStopDone() const {
-    std::lock_guard<std::mutex> guard(shutdown_mtx_);
-    return safe_stop_done_;
-  }
-
-  void RunSafeReturnStep(const rclcpp::Time &now) {
-    if (!safe_return_initialized_) {
-      current_jpos_des_ = current_jpos_meas_;
-      desired_17_ = current_jpos_meas_;
-
-      safe_return_target_17_ = base_q_17_;
-      ApplyInput8ToDesired17(q_home_8_, base_q_17_, safe_return_target_17_);
-
-      q_target_safe_8_ = q_home_8_;
-      safe_return_initialized_ = true;
-      safe_return_hold_started_ = false;
-
-      RCLCPP_WARN(this->get_logger(),
-                  "SAFE_RETURN started: moving to q_home before release.");
-    }
-
-    desired_17_ = safe_return_target_17_;
-    StepTowardsDesired(shutdown_max_joint_delta_);
-
-    if (use_weight_ramp_) {
-      weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                       0.0F, static_cast<float>(weight_active_));
-    } else {
-      weight_ = static_cast<float>(weight_active_);
-    }
-
-    const double remain = GetMaxAbsError(current_jpos_des_, safe_return_target_17_);
-
-    if (remain <= std::max(1e-4, shutdown_max_joint_delta_ * 0.5)) {
-      if (!safe_return_hold_started_) {
-        safe_return_hold_started_ = true;
-        safe_return_hold_start_time_ = now;
-        RCLCPP_WARN(this->get_logger(), "SAFE_RETURN reached q_home. Holding...");
-      }
-
-      const double hold_elapsed = (now - safe_return_hold_start_time_).seconds();
-      if (hold_elapsed >= shutdown_hold_sec_) {
-        if (use_weight_ramp_) {
-          const float delta_w = static_cast<float>(weight_release_rate_ * control_dt_);
-          weight_ = ClampF(weight_ - delta_w, 0.0F, static_cast<float>(weight_active_));
-        } else {
-          weight_ = 0.0F;
-        }
-
-        if (weight_ <= 1e-4F) {
-          weight_ = 0.0F;
-          {
-            std::lock_guard<std::mutex> guard(shutdown_mtx_);
-            safe_stop_done_ = true;
-            safe_stop_requested_ = false;
-            shutdown_released_ = true;
-          }
-          RCLCPP_WARN(this->get_logger(),
-                      "SAFE_RETURN complete. Arm control released.");
-        }
-      }
-    } else {
-      safe_return_hold_started_ = false;
-    }
-  }
-
- private:
-  enum class BridgeMode {
-    HOLD_CURRENT,
-    MOVE_TO_HOME,
-    WAIT_FOR_QDES,
-    TRACK_ENTRY,
-    TRACK_QDES,
-    SAFE_RETURN
-  };
-
-  static double Clamp(double x, double lo, double hi) {
-    return std::max(lo, std::min(x, hi));
-  }
-
-  static float ClampF(float x, float lo, float hi) {
-    return std::max(lo, std::min(x, hi));
-  }
-
-  static double Lerp(double a, double b, double t) {
-    return a + (b - a) * t;
   }
 
   void OnQdes(const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
     if (msg->data.size() != 8) {
-      RCLCPP_WARN(this->get_logger(),
-                  "Expected q_des dim=8, got %zu",
-                  msg->data.size());
+      RCLCPP_WARN(this->get_logger(), "Expected q_des dim=8, got %zu", msg->data.size());
       return;
     }
 
     std::lock_guard<std::mutex> lock(mtx_);
-
     for (size_t i = 0; i < 8; ++i) {
       double v = static_cast<double>(msg->data[i]);
       if (qdes_in_degrees_) {
@@ -339,7 +287,6 @@ class G1ArmSdkBridge : public rclcpp::Node {
       }
       latest_q_des_8_[i] = Clamp(v, q_min_8_[i], q_max_8_[i]);
     }
-
     has_qdes_ = true;
     last_qdes_time_ = this->now();
   }
@@ -354,33 +301,42 @@ class G1ArmSdkBridge : public rclcpp::Node {
     }
 
     if (!has_lowstate_) {
+      base_q_17_ = current_jpos_meas_;
       current_jpos_des_ = current_jpos_meas_;
       desired_17_ = current_jpos_meas_;
-      base_q_17_ = current_jpos_meas_;
+      q_target_safe_8_ = ExtractInput8FromMeasured17(current_jpos_meas_);
+      track_entry_start_8_ = q_target_safe_8_;
+      home_target_17_ = BuildTarget17FromQ8(q_home_8_);
 
-      q_home_start_8_ = ExtractInput8FromMeasured17(current_jpos_meas_);
-      q_target_safe_8_ = q_home_start_8_;
-      track_start_8_ = q_home_start_8_;
-
-      home_transition_start_time_ = this->now();
-      home_hold_start_time_ = this->now();
-      track_entry_start_time_ = this->now();
-      home_initialized_ = true;
-      home_reached_ = !auto_move_to_home_;
-      qdes_gate_open_ = false;
       has_lowstate_ = true;
+      phase_start_time_ = this->now();
+      phase_ = BridgeMode::STARTUP_ACQUIRE;
 
+      LogFirstLowstate();
       RCLCPP_INFO(this->get_logger(),
-                  "Received first /lowstate. Bridge initialized from current measured pose.");
+                  "Received first /lowstate. Startup sequence begins from measured pose.");
     }
 
     PublishJointStateFromLowState(*msg);
   }
 
+  void LogFirstLowstate() {
+    if (startup_snapshot_logged_) {
+      return;
+    }
+    const auto q8 = ExtractInput8FromMeasured17(current_jpos_meas_);
+    RCLCPP_WARN(
+        this->get_logger(),
+        "[first_lowstate] q8_init_deg: wr=%.1f wp=%.1f lsp=%.1f lsr=%.1f le=%.1f rsp=%.1f rsr=%.1f re=%.1f | raw17 waist_yaw=%.1f waist_roll=%.1f waist_pitch=%.1f",
+        Rad2Deg(q8[0]), Rad2Deg(q8[1]), Rad2Deg(q8[2]), Rad2Deg(q8[3]), Rad2Deg(q8[4]),
+        Rad2Deg(q8[5]), Rad2Deg(q8[6]), Rad2Deg(q8[7]),
+        Rad2Deg(base_q_17_[14]), Rad2Deg(base_q_17_[15]), Rad2Deg(base_q_17_[16]));
+    startup_snapshot_logged_ = true;
+  }
+
   void PublishJointStateFromLowState(const LowState &msg) {
     JointState js;
     js.header.stamp = this->get_clock()->now();
-
     js.name.reserve(G1_NUM_MOTOR);
     js.position.reserve(G1_NUM_MOTOR);
     js.velocity.reserve(G1_NUM_MOTOR);
@@ -407,18 +363,14 @@ class G1ArmSdkBridge : public rclcpp::Node {
     q8[5] = static_cast<double>(q17_meas[7]);
     q8[6] = static_cast<double>(q17_meas[8]);
     q8[7] = static_cast<double>(q17_meas[10]);
-
     for (size_t i = 0; i < 8; ++i) {
       q8[i] = Clamp(q8[i], q_min_8_[i], q_max_8_[i]);
     }
     return q8;
   }
 
-  void ApplyInput8ToDesired17(const std::vector<double> &q8,
-                              const std::array<float, NUM_ARM_JOINTS> &base_q17,
-                              std::array<float, NUM_ARM_JOINTS> &q17) {
-    q17 = base_q17;
-
+  std::array<float, NUM_ARM_JOINTS> BuildTarget17FromQ8(const std::vector<double> &q8) const {
+    std::array<float, NUM_ARM_JOINTS> q17 = base_q_17_;
     q17[0] = static_cast<float>(q8[2]);
     q17[1] = static_cast<float>(q8[3]);
     q17[3] = static_cast<float>(q8[4]);
@@ -427,6 +379,263 @@ class G1ArmSdkBridge : public rclcpp::Node {
     q17[10] = static_cast<float>(q8[7]);
     q17[15] = static_cast<float>(q8[0]);
     q17[16] = static_cast<float>(q8[1]);
+    return q17;
+  }
+
+  static double GetMaxAbsErrorControlled8(const std::array<float, NUM_ARM_JOINTS> &a,
+                                          const std::array<float, NUM_ARM_JOINTS> &b) {
+    const std::array<int, 8> idx = {15, 16, 0, 1, 3, 7, 8, 10};
+    double v = 0.0;
+    for (int i : idx) {
+      v = std::max(v, std::fabs(static_cast<double>(a[i] - b[i])));
+    }
+    return v;
+  }
+
+  void StepTowardsDesired(double max_delta) {
+    for (size_t j = 0; j < current_jpos_des_.size(); ++j) {
+      float err = desired_17_[j] - current_jpos_des_[j];
+      err = ClampF(err, -static_cast<float>(max_delta), static_cast<float>(max_delta));
+      current_jpos_des_[j] += err;
+    }
+  }
+
+  bool TargetReachedControlled8(const std::array<float, NUM_ARM_JOINTS> &target) const {
+    return GetMaxAbsErrorControlled8(current_jpos_meas_, target) <= kPoseArrivalToleranceRad;
+  }
+
+  void SetWeightToActive() {
+    if (use_weight_ramp_) {
+      const float delta_w = static_cast<float>(weight_acquire_rate_ * control_dt_);
+      weight_ = ClampF(weight_ + delta_w, 0.0F, static_cast<float>(weight_active_));
+    } else {
+      weight_ = static_cast<float>(weight_active_);
+    }
+  }
+
+  void SetWeightToZero() {
+    weight_ = 0.0F;
+  }
+
+  void ReleaseWeightOneStep() {
+    if (use_weight_ramp_) {
+      const float delta_w = static_cast<float>(weight_release_rate_ * control_dt_);
+      weight_ = ClampF(weight_ - delta_w, 0.0F, static_cast<float>(weight_active_));
+    } else {
+      weight_ = 0.0F;
+    }
+  }
+
+  bool WeightIsActive() const {
+    return weight_ >= static_cast<float>(weight_active_ - 1e-4);
+  }
+
+  bool WeightIsReleased() const {
+    return weight_ <= kWeightDoneEps;
+  }
+
+  void EnterPhase(BridgeMode next_phase, const rclcpp::Time &now) {
+    phase_ = next_phase;
+    phase_start_time_ = now;
+
+    if (next_phase == BridgeMode::TRACK_ENTRY) {
+      track_entry_start_8_ = q_target_safe_8_;
+    }
+
+    if (next_phase == BridgeMode::SHUTDOWN_MOVE_HOME) {
+      q_target_safe_8_ = q_home_8_;
+    }
+  }
+
+  BridgeMode GetCurrentMode(bool qdes_fresh, const rclcpp::Time &now) {
+    {
+      std::lock_guard<std::mutex> guard(shutdown_mtx_);
+      if (safe_stop_requested_) {
+        if (phase_ != BridgeMode::SHUTDOWN_MOVE_HOME &&
+            phase_ != BridgeMode::SHUTDOWN_HOLD_HOME &&
+            phase_ != BridgeMode::SHUTDOWN_RELEASE) {
+          EnterPhase(BridgeMode::SHUTDOWN_MOVE_HOME, now);
+          RCLCPP_WARN(this->get_logger(),
+                      "Shutdown requested. Switching to SHUTDOWN_MOVE_HOME.");
+        }
+      }
+    }
+
+    switch (phase_) {
+      case BridgeMode::WAIT_FOR_LOWSTATE:
+        return phase_;
+      case BridgeMode::STARTUP_ACQUIRE:
+      case BridgeMode::STARTUP_MOVE_HOME:
+      case BridgeMode::STARTUP_HOLD_HOME:
+      case BridgeMode::SHUTDOWN_MOVE_HOME:
+      case BridgeMode::SHUTDOWN_HOLD_HOME:
+      case BridgeMode::SHUTDOWN_RELEASE:
+        return phase_;
+      case BridgeMode::WAIT_FOR_QDES:
+      case BridgeMode::TRACK_ENTRY:
+      case BridgeMode::TRACK_QDES:
+        break;
+    }
+
+    if (qdes_fresh) {
+      if (phase_ != BridgeMode::TRACK_ENTRY && phase_ != BridgeMode::TRACK_QDES) {
+        EnterPhase(BridgeMode::TRACK_ENTRY, now);
+      }
+    } else {
+      if (phase_ != BridgeMode::WAIT_FOR_QDES) {
+        EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+      }
+    }
+    return phase_;
+  }
+
+  void RunStartupAcquire(const rclcpp::Time &now) {
+    desired_17_ = base_q_17_;
+    q_target_safe_8_ = ExtractInput8FromMeasured17(base_q_17_);
+    StepTowardsDesired(max_joint_delta_);
+    SetWeightToActive();
+
+    if (WeightIsActive()) {
+      if (auto_move_to_home_) {
+        home_target_17_ = BuildTarget17FromQ8(q_home_8_);
+        q_target_safe_8_ = q_home_8_;
+        EnterPhase(BridgeMode::STARTUP_MOVE_HOME, now);
+        RCLCPP_INFO(this->get_logger(),
+                    "Startup acquire complete. Switching to STARTUP_MOVE_HOME.");
+      } else {
+        q_target_safe_8_ = q_home_8_;
+        EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+        RCLCPP_INFO(this->get_logger(),
+                    "Startup acquire complete. Skipping auto home and waiting for q_des.");
+      }
+    }
+  }
+
+  void RunStartupMoveHome(const rclcpp::Time &now) {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(home_max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+
+    if (TargetReachedControlled8(home_target_17_)) {
+      if (home_hold_sec_ > 1e-6) {
+        EnterPhase(BridgeMode::STARTUP_HOLD_HOME, now);
+        RCLCPP_INFO(this->get_logger(), "Startup home reached. Holding at q_home.");
+      } else {
+        EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+        RCLCPP_INFO(this->get_logger(), "Startup home reached. Waiting for q_des.");
+      }
+    }
+  }
+
+  void RunStartupHoldHome(const rclcpp::Time &now) {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(home_max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+
+    if ((now - phase_start_time_).seconds() >= home_hold_sec_) {
+      EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+      RCLCPP_INFO(this->get_logger(), "Startup hold complete. Waiting for q_des.");
+    }
+  }
+
+  void RunWaitForQdes() {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(home_max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+  }
+
+  void RunTrackEntry(const rclcpp::Time &now, bool qdes_fresh) {
+    if (!qdes_fresh) {
+      EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+      RunWaitForQdes();
+      return;
+    }
+
+    const double duration = std::max(control_dt_, track_entry_blend_sec_);
+    const double t = Clamp((now - phase_start_time_).seconds() / duration, 0.0, 1.0);
+
+    std::vector<double> target8 = latest_q_des_8_;
+    for (size_t i = 0; i < 8; ++i) {
+      target8[i] = Clamp(target8[i], q_min_8_[i], q_max_8_[i]);
+    }
+
+    q_target_safe_8_.assign(8, 0.0);
+    for (size_t i = 0; i < 8; ++i) {
+      q_target_safe_8_[i] = Lerp(track_entry_start_8_[i], target8[i], t);
+    }
+
+    desired_17_ = BuildTarget17FromQ8(q_target_safe_8_);
+    StepTowardsDesired(max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+
+    if (t >= 1.0) {
+      EnterPhase(BridgeMode::TRACK_QDES, now);
+    }
+  }
+
+  void RunTrackQdes(const rclcpp::Time &now, bool qdes_fresh) {
+    if (!qdes_fresh) {
+      EnterPhase(BridgeMode::WAIT_FOR_QDES, now);
+      RunWaitForQdes();
+      return;
+    }
+
+    std::vector<double> q_ref_8 = latest_q_des_8_;
+    for (size_t i = 0; i < 8; ++i) {
+      q_ref_8[i] = Clamp(q_ref_8[i], q_min_8_[i], q_max_8_[i]);
+      q_target_safe_8_[i] = ema_alpha_ * q_ref_8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
+    }
+
+    desired_17_ = BuildTarget17FromQ8(q_target_safe_8_);
+    StepTowardsDesired(max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+  }
+
+  void RunShutdownMoveHome(const rclcpp::Time &now) {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(shutdown_max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+
+    if (TargetReachedControlled8(home_target_17_)) {
+      if (shutdown_hold_sec_ > 1e-6) {
+        EnterPhase(BridgeMode::SHUTDOWN_HOLD_HOME, now);
+        RCLCPP_WARN(this->get_logger(), "Shutdown home reached. Holding at q_home.");
+      } else {
+        EnterPhase(BridgeMode::SHUTDOWN_RELEASE, now);
+        RCLCPP_WARN(this->get_logger(), "Shutdown home reached. Releasing immediately.");
+      }
+    }
+  }
+
+  void RunShutdownHoldHome(const rclcpp::Time &now) {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(shutdown_max_joint_delta_);
+    weight_ = static_cast<float>(weight_active_);
+
+    if ((now - phase_start_time_).seconds() >= shutdown_hold_sec_) {
+      EnterPhase(BridgeMode::SHUTDOWN_RELEASE, now);
+      RCLCPP_WARN(this->get_logger(), "Shutdown hold complete. Releasing weight.");
+    }
+  }
+
+  void RunShutdownRelease() {
+    desired_17_ = home_target_17_;
+    q_target_safe_8_ = q_home_8_;
+    StepTowardsDesired(shutdown_max_joint_delta_);
+    ReleaseWeightOneStep();
+
+    if (WeightIsReleased()) {
+      SetWeightToZero();
+      std::lock_guard<std::mutex> guard(shutdown_mtx_);
+      safe_stop_done_ = true;
+      safe_stop_requested_ = false;
+      RCLCPP_WARN(this->get_logger(), "Shutdown release complete.");
+    }
   }
 
   void FillLowCmdFromCurrentDes(LowCmd &cmd) {
@@ -449,130 +658,6 @@ class G1ArmSdkBridge : public rclcpp::Node {
     cmd.motor_cmd[static_cast<int>(NOT_USED_JOINT)].q = weight_;
   }
 
-  BridgeMode GetCurrentMode(bool qdes_fresh) {
-    {
-      std::lock_guard<std::mutex> guard(shutdown_mtx_);
-      if (safe_stop_requested_) {
-        return BridgeMode::SAFE_RETURN;
-      }
-    }
-
-    if (!home_initialized_) {
-      return BridgeMode::HOLD_CURRENT;
-    }
-    if (!home_reached_) {
-      return BridgeMode::MOVE_TO_HOME;
-    }
-    if (!qdes_gate_open_) {
-      qdes_gate_open_ = true;
-      track_entry_start_time_ = this->now();
-      track_start_8_ = q_home_8_;
-      q_target_safe_8_ = q_home_8_;
-      RCLCPP_INFO(this->get_logger(), "Initialization phase complete. q_des gate is now open.");
-      return BridgeMode::WAIT_FOR_QDES;
-    }
-    if (qdes_fresh && !track_entry_done_) {
-      return BridgeMode::TRACK_ENTRY;
-    }
-    if (qdes_fresh) {
-      return BridgeMode::TRACK_QDES;
-    }
-    track_entry_done_ = false;
-    return BridgeMode::WAIT_FOR_QDES;
-  }
-
-  std::vector<double> ComputeHomeReference(const rclcpp::Time &now) {
-    if (!auto_move_to_home_) {
-      home_reached_ = true;
-      return q_home_8_;
-    }
-
-    const double elapsed = (now - home_transition_start_time_).seconds();
-    const double move_duration = GetHomeMoveDuration();
-
-    std::vector<double> q8(8, 0.0);
-    for (size_t i = 0; i < 8; ++i) {
-      const double dist = std::fabs(q_home_8_[i] - q_home_start_8_[i]);
-      const double duration =
-          (home_transition_velocity_ > 1e-6) ? dist / home_transition_velocity_ : 0.0;
-      const double ti = (duration > 1e-6) ? Clamp(elapsed / duration, 0.0, 1.0) : 1.0;
-      q8[i] = Lerp(q_home_start_8_[i], q_home_8_[i], ti);
-    }
-
-    if (elapsed >= move_duration) {
-      if ((now - home_hold_start_time_).seconds() < control_dt_ * 1.5) {
-        RCLCPP_INFO(this->get_logger(), "Reached q_home. Holding before enabling q_des tracking...");
-      }
-      if ((now - home_transition_start_time_).seconds() >= move_duration + home_hold_sec_) {
-        home_reached_ = true;
-        q_target_safe_8_ = q_home_8_;
-        track_start_8_ = q_home_8_;
-        track_entry_done_ = false;
-        RCLCPP_INFO(this->get_logger(), "Home hold complete.");
-      }
-    } else {
-      home_hold_start_time_ = now;
-    }
-
-    return q8;
-  }
-
-  std::vector<double> ComputeTrackEntryReference(const rclcpp::Time &now, bool qdes_fresh) {
-    if (!qdes_fresh) {
-      track_entry_done_ = false;
-      return q_home_8_;
-    }
-
-    const double elapsed = (now - track_entry_start_time_).seconds();
-    const double duration = std::max(control_dt_, track_entry_blend_sec_);
-    const double t = Clamp(elapsed / duration, 0.0, 1.0);
-
-    std::vector<double> target8 = latest_q_des_8_;
-    for (size_t i = 0; i < 8; ++i) {
-      target8[i] = Clamp(target8[i], q_min_8_[i], q_max_8_[i]);
-      target8[i] = ema_alpha_ * target8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
-    }
-
-    std::vector<double> q8(8, 0.0);
-    for (size_t i = 0; i < 8; ++i) {
-      q8[i] = Lerp(track_start_8_[i], target8[i], t);
-    }
-
-    if (t >= 1.0) {
-      track_entry_done_ = true;
-    }
-
-    return q8;
-  }
-
-  double GetHomeMoveDuration() const {
-    double max_duration = 0.0;
-    for (size_t i = 0; i < 8; ++i) {
-      const double dist = std::fabs(q_home_8_[i] - q_home_start_8_[i]);
-      const double duration =
-          (home_transition_velocity_ > 1e-6) ? dist / home_transition_velocity_ : 0.0;
-      max_duration = std::max(max_duration, duration);
-    }
-    return max_duration;
-  }
-
-  static double GetMaxAbsError(const std::array<float, NUM_ARM_JOINTS> &a,
-                               const std::array<float, NUM_ARM_JOINTS> &b) {
-    double v = 0.0;
-    for (size_t i = 0; i < a.size(); ++i) {
-      v = std::max(v, std::fabs(static_cast<double>(a[i] - b[i])));
-    }
-    return v;
-  }
-
-  void StepTowardsDesired(double max_delta) {
-    for (size_t j = 0; j < current_jpos_des_.size(); ++j) {
-      float err = desired_17_[j] - current_jpos_des_[j];
-      err = ClampF(err, -static_cast<float>(max_delta), static_cast<float>(max_delta));
-      current_jpos_des_[j] += err;
-    }
-  }
-
   void ControlLoop() {
     std::lock_guard<std::mutex> lock(mtx_);
 
@@ -586,68 +671,38 @@ class G1ArmSdkBridge : public rclcpp::Node {
     const bool qdes_fresh =
         has_qdes_ && ((now - last_qdes_time_).seconds() <= topic_timeout_sec_);
 
-    const BridgeMode mode = GetCurrentMode(qdes_fresh);
+    const BridgeMode mode = GetCurrentMode(qdes_fresh, now);
 
-    double used_max_delta = max_joint_delta_;
-    std::vector<double> q_ref_8 = q_target_safe_8_;
-
-    if (mode == BridgeMode::SAFE_RETURN) {
-      RunSafeReturnStep(now);
-    } else if (mode == BridgeMode::HOLD_CURRENT) {
-      desired_17_ = current_jpos_meas_;
-      weight_ = 0.0F;
-      StepTowardsDesired(used_max_delta);
-    } else if (mode == BridgeMode::MOVE_TO_HOME) {
-      q_ref_8 = ComputeHomeReference(now);
-      q_target_safe_8_ = q_ref_8;
-      used_max_delta = home_max_joint_delta_;
-      if (use_weight_ramp_) {
-        weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                         0.0F, static_cast<float>(weight_active_));
-      } else {
-        weight_ = static_cast<float>(weight_active_);
-      }
-      ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
-      StepTowardsDesired(used_max_delta);
-    } else if (mode == BridgeMode::WAIT_FOR_QDES) {
-      q_ref_8 = q_home_8_;
-      q_target_safe_8_ = q_ref_8;
-      track_start_8_ = q_home_8_;
-      if (use_weight_ramp_) {
-        weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                         0.0F, static_cast<float>(weight_active_));
-      } else {
-        weight_ = static_cast<float>(weight_active_);
-      }
-      ApplyInput8ToDesired17(q_ref_8, base_q_17_, desired_17_);
-      StepTowardsDesired(used_max_delta);
-    } else if (mode == BridgeMode::TRACK_ENTRY) {
-      used_max_delta = max_joint_delta_;
-      q_ref_8 = ComputeTrackEntryReference(now, qdes_fresh);
-      q_target_safe_8_ = q_ref_8;
-      if (use_weight_ramp_) {
-        weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                         0.0F, static_cast<float>(weight_active_));
-      } else {
-        weight_ = static_cast<float>(weight_active_);
-      }
-      ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
-      StepTowardsDesired(used_max_delta);
-    } else {
-      q_ref_8 = latest_q_des_8_;
-      for (size_t i = 0; i < 8; ++i) {
-        q_ref_8[i] = Clamp(q_ref_8[i], q_min_8_[i], q_max_8_[i]);
-        q_target_safe_8_[i] =
-            ema_alpha_ * q_ref_8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
-      }
-      if (use_weight_ramp_) {
-        weight_ = ClampF(weight_ + static_cast<float>(weight_acquire_rate_ * control_dt_),
-                         0.0F, static_cast<float>(weight_active_));
-      } else {
-        weight_ = static_cast<float>(weight_active_);
-      }
-      ApplyInput8ToDesired17(q_target_safe_8_, base_q_17_, desired_17_);
-      StepTowardsDesired(used_max_delta);
+    switch (mode) {
+      case BridgeMode::WAIT_FOR_LOWSTATE:
+        break;
+      case BridgeMode::STARTUP_ACQUIRE:
+        RunStartupAcquire(now);
+        break;
+      case BridgeMode::STARTUP_MOVE_HOME:
+        RunStartupMoveHome(now);
+        break;
+      case BridgeMode::STARTUP_HOLD_HOME:
+        RunStartupHoldHome(now);
+        break;
+      case BridgeMode::WAIT_FOR_QDES:
+        RunWaitForQdes();
+        break;
+      case BridgeMode::TRACK_ENTRY:
+        RunTrackEntry(now, qdes_fresh);
+        break;
+      case BridgeMode::TRACK_QDES:
+        RunTrackQdes(now, qdes_fresh);
+        break;
+      case BridgeMode::SHUTDOWN_MOVE_HOME:
+        RunShutdownMoveHome(now);
+        break;
+      case BridgeMode::SHUTDOWN_HOLD_HOME:
+        RunShutdownHoldHome(now);
+        break;
+      case BridgeMode::SHUTDOWN_RELEASE:
+        RunShutdownRelease();
+        break;
     }
 
     LowCmd cmd;
@@ -655,43 +710,37 @@ class G1ArmSdkBridge : public rclcpp::Node {
     pub_arm_sdk_->publish(cmd);
 
     if ((now - last_log_time_).seconds() > 1.0) {
-      auto deg = [](double rad) { return rad * 180.0 / kPi; };
       const char *mode_str = "unknown";
       switch (mode) {
-        case BridgeMode::HOLD_CURRENT:
-          mode_str = "hold_current";
-          break;
-        case BridgeMode::MOVE_TO_HOME:
-          mode_str = "move_to_home";
-          break;
-        case BridgeMode::WAIT_FOR_QDES:
-          mode_str = "wait_for_qdes";
-          break;
-        case BridgeMode::TRACK_ENTRY:
-          mode_str = "track_entry";
-          break;
-        case BridgeMode::TRACK_QDES:
-          mode_str = "track_qdes";
-          break;
-        case BridgeMode::SAFE_RETURN:
-          mode_str = "safe_return";
-          break;
+        case BridgeMode::WAIT_FOR_LOWSTATE: mode_str = "wait_for_lowstate"; break;
+        case BridgeMode::STARTUP_ACQUIRE: mode_str = "startup_acquire"; break;
+        case BridgeMode::STARTUP_MOVE_HOME: mode_str = "startup_move_home"; break;
+        case BridgeMode::STARTUP_HOLD_HOME: mode_str = "startup_hold_home"; break;
+        case BridgeMode::WAIT_FOR_QDES: mode_str = "wait_for_qdes"; break;
+        case BridgeMode::TRACK_ENTRY: mode_str = "track_entry"; break;
+        case BridgeMode::TRACK_QDES: mode_str = "track_qdes"; break;
+        case BridgeMode::SHUTDOWN_MOVE_HOME: mode_str = "shutdown_move_home"; break;
+        case BridgeMode::SHUTDOWN_HOLD_HOME: mode_str = "shutdown_hold_home"; break;
+        case BridgeMode::SHUTDOWN_RELEASE: mode_str = "shutdown_release"; break;
       }
+
       RCLCPP_INFO(
           this->get_logger(),
-          "[bridge] mode=%s gate=%s weight=%.2f fresh=%s | q8_deg: wr=%.1f wp=%.1f lsp=%.1f lsr=%.1f le=%.1f rsp=%.1f rsr=%.1f re=%.1f",
+          "[bridge] mode=%s weight=%.2f fresh=%s | q8_target_deg: wr=%.1f wp=%.1f lsp=%.1f lsr=%.1f le=%.1f rsp=%.1f rsr=%.1f re=%.1f | meas_waist_deg: yaw=%.1f roll=%.1f pitch=%.1f",
           mode_str,
-          qdes_gate_open_ ? "open" : "closed",
           weight_,
           qdes_fresh ? "true" : "false",
-          deg(q_target_safe_8_[0]),
-          deg(q_target_safe_8_[1]),
-          deg(q_target_safe_8_[2]),
-          deg(q_target_safe_8_[3]),
-          deg(q_target_safe_8_[4]),
-          deg(q_target_safe_8_[5]),
-          deg(q_target_safe_8_[6]),
-          deg(q_target_safe_8_[7]));
+          Rad2Deg(q_target_safe_8_[0]),
+          Rad2Deg(q_target_safe_8_[1]),
+          Rad2Deg(q_target_safe_8_[2]),
+          Rad2Deg(q_target_safe_8_[3]),
+          Rad2Deg(q_target_safe_8_[4]),
+          Rad2Deg(q_target_safe_8_[5]),
+          Rad2Deg(q_target_safe_8_[6]),
+          Rad2Deg(q_target_safe_8_[7]),
+          Rad2Deg(current_jpos_meas_[14]),
+          Rad2Deg(current_jpos_meas_[15]),
+          Rad2Deg(current_jpos_meas_[16]));
       last_log_time_ = now;
     }
   }
@@ -708,76 +757,65 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
   std::string qdes_topic_;
   std::string joint_state_topic_;
-  bool qdes_in_degrees_;
-  bool use_weight_ramp_;
-  bool hold_uncontrolled_joints_at_start_pose_;
+  bool qdes_in_degrees_{};
+  bool use_weight_ramp_{};
+  bool hold_uncontrolled_joints_at_start_pose_{};
 
-  double control_dt_;
-  double ema_alpha_;
-  double max_joint_velocity_;
-  double max_joint_delta_;
-  double topic_timeout_sec_;
-  double home_transition_velocity_;
-  double home_max_joint_delta_;
-  double track_entry_blend_sec_;
-  double shutdown_return_velocity_;
-  double shutdown_max_joint_delta_;
-  double shutdown_hold_sec_;
+  double control_dt_{};
+  double ema_alpha_{};
+  double max_joint_velocity_{};
+  double max_joint_delta_{};
+  double topic_timeout_sec_{};
+  double home_transition_velocity_{};
+  double home_max_joint_delta_{};
+  double track_entry_blend_sec_{};
+  double shutdown_return_velocity_{};
+  double shutdown_max_joint_delta_{};
+  double shutdown_hold_sec_{};
 
-  double kp_arm_;
-  double kd_arm_;
-  double kp_waist_;
-  double kd_waist_;
-  double dq_;
-  double tau_ff_;
+  double kp_arm_{};
+  double kd_arm_{};
+  double kp_waist_{};
+  double kd_waist_{};
+  double dq_{};
+  double tau_ff_{};
 
-  double weight_active_;
-  double weight_acquire_rate_;
-  double weight_release_rate_;
+  double weight_active_{};
+  double weight_acquire_rate_{};
+  double weight_release_rate_{};
 
-  bool auto_move_to_home_;
-  double home_hold_sec_;
+  bool auto_move_to_home_{};
+  double home_hold_sec_{};
 
   std::vector<double> q_home_8_;
   std::vector<double> q_min_8_;
   std::vector<double> q_max_8_;
 
-  std::chrono::milliseconds sleep_time_{};
+  LowState last_state_{};
+  std::array<G1Arm7JointIndex, NUM_ARM_JOINTS> arm_joints_{};
 
-  LowState last_state_;
-  std::array<G1Arm7JointIndex, NUM_ARM_JOINTS> arm_joints_;
-
-  std::array<float, NUM_ARM_JOINTS> current_jpos_des_;
-  std::array<float, NUM_ARM_JOINTS> current_jpos_meas_;
-  std::array<float, NUM_ARM_JOINTS> desired_17_;
-  std::array<float, NUM_ARM_JOINTS> base_q_17_;
+  std::array<float, NUM_ARM_JOINTS> current_jpos_des_{};
+  std::array<float, NUM_ARM_JOINTS> current_jpos_meas_{};
+  std::array<float, NUM_ARM_JOINTS> desired_17_{};
+  std::array<float, NUM_ARM_JOINTS> base_q_17_{};
+  std::array<float, NUM_ARM_JOINTS> home_target_17_{};
 
   std::vector<double> latest_q_des_8_;
   std::vector<double> q_target_safe_8_;
-  std::vector<double> q_home_start_8_;
-  std::vector<double> track_start_8_;
+  std::vector<double> track_entry_start_8_;
 
-  bool has_qdes_;
-  bool has_lowstate_;
-  bool shutdown_released_;
-  bool safe_stop_requested_{false};
-  bool safe_stop_done_{false};
-  bool safe_return_initialized_{false};
-  bool safe_return_hold_started_{false};
-  bool home_initialized_;
-  bool home_reached_;
-  bool qdes_gate_open_;
-  bool track_entry_done_{false};
-  float weight_;
+  bool has_qdes_{};
+  bool has_lowstate_{};
+  bool safe_stop_requested_{};
+  bool safe_stop_done_{};
+  bool startup_snapshot_logged_{};
+  float weight_{};
 
-  std::array<float, NUM_ARM_JOINTS> safe_return_target_17_{};
-  rclcpp::Time safe_return_hold_start_time_;
+  BridgeMode phase_{BridgeMode::WAIT_FOR_LOWSTATE};
 
-  rclcpp::Time last_qdes_time_;
-  rclcpp::Time last_log_time_;
-  rclcpp::Time home_transition_start_time_;
-  rclcpp::Time home_hold_start_time_;
-  rclcpp::Time track_entry_start_time_;
+  rclcpp::Time last_qdes_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_log_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time phase_start_time_{0, 0, RCL_ROS_TIME};
 };
 
 int main(int argc, char **argv) {
@@ -786,9 +824,7 @@ int main(int argc, char **argv) {
   rclcpp::init(argc, argv, init_options);
 
   static std::atomic<bool> g_sigint_requested{false};
-  std::signal(SIGINT, [](int) {
-    g_sigint_requested.store(true);
-  });
+  std::signal(SIGINT, [](int) { g_sigint_requested.store(true); });
 
   auto node = std::make_shared<G1ArmSdkBridge>();
   rclcpp::executors::SingleThreadedExecutor executor;
