@@ -41,3 +41,6 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+
+# cbf extra
+g1_real_ws/src/g1_cbf_ros2/g1_bridge/
