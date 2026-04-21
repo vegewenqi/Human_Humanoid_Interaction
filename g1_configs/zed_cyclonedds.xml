@@ -2,7 +2,8 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <NetworkInterface name="enP8p1s0" multicast="default" />
+        <!-- <NetworkInterface name="enP8p1s0" multicast="default" /> -->
+        <NetworkInterface name="wlP1p1s0" multicast="default" />
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>
