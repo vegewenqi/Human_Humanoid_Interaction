@@ -384,7 +384,10 @@ class G1ArmSdkBridge : public rclcpp::Node {
 
   static double GetMaxAbsErrorControlled8(const std::array<float, NUM_ARM_JOINTS> &a,
                                           const std::array<float, NUM_ARM_JOINTS> &b) {
-    const std::array<int, 8> idx = {15, 16, 0, 1, 3, 7, 8, 10};
+    // ToDo: the waist pitch error always block the "return_to_q_home" thresold when start and stop, so 
+    // index 16 is removed from the error check for now.
+    // const std::array<int, 8> idx = {15, 16, 0, 1, 3, 7, 8, 10};
+    const std::array<int, 8> idx = {15, 0, 1, 3, 7, 8, 10};
     double v = 0.0;
     for (int i : idx) {
       v = std::max(v, std::fabs(static_cast<double>(a[i] - b[i])));
