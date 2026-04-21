@@ -67,9 +67,11 @@ class G1CBFNode(Node):
 
         # ---------------- Parameters ----------------
         self.declare_parameter('dt', 0.02)
-        self.declare_parameter('margin_phi', 0.001)
+        self.declare_parameter('rr_margin_phi', 0.0063)
+        self.declare_parameter('hr_margin_phi', 0.028)
         self.declare_parameter('beta', 1.05)
-        self.declare_parameter('gamma', 5.0)
+        self.declare_parameter('rr_gamma', 2.0)
+        self.declare_parameter('hr_gamma', 2.0)
         self.declare_parameter('K', 5.0)
         self.declare_parameter('max_velocity', 0.5)
         self.declare_parameter('lpf_gain', 0.1)
@@ -94,7 +96,10 @@ class G1CBFNode(Node):
         from g1_cbf.cbf import DpaxCapsuleCBF, DpaxBoxCBF  # noqa: E402
 
         dt = self.get_parameter('dt').value
-        gamma = self.get_parameter('gamma').value
+        rr_gamma = self.get_parameter('rr_gamma').value
+        hr_gamma = self.get_parameter('hr_gamma').value
+        rr_margin_phi = self.get_parameter('rr_margin_phi').value
+        hr_margin_phi = self.get_parameter('hr_margin_phi').value
         urdf_path = self.get_parameter('urdf_path').value
         self.geom_type = self.get_parameter('collision_geometry').value
 
@@ -120,7 +125,7 @@ class G1CBFNode(Node):
 
         self.get_logger().info(f'Loading URDF: {urdf_path}')
         self.get_logger().info(
-            f'CBF params: dt={dt}, gamma={gamma}, self_geom={self.geom_type}'
+            f'CBF params: dt={dt}, rr_gamma={rr_gamma}, rr_margin_phi={rr_margin_phi}, hr_gamma={hr_gamma}, hr_margin_phi={hr_margin_phi}, self_geom={self.geom_type}'
         )
 
         # ---------------- Subsystems ----------------
@@ -130,22 +135,20 @@ class G1CBFNode(Node):
         # Self-collision CBF
         if self.geom_type == 'boxes':
             beta = self.get_parameter('beta').value
-            self.self_cbf = DpaxBoxCBF(gamma=gamma, beta=beta)
+            self.self_cbf = DpaxBoxCBF(gamma=rr_gamma, beta=beta)
         else:
-            margin_phi = self.get_parameter('margin_phi').value
             self.self_cbf = DpaxCapsuleCBF(
-                gamma=gamma, margin_phi=margin_phi,
+                gamma=rr_gamma, margin_phi=rr_margin_phi,
             )
 
         # Human-collision CBF always uses capsules
-        margin_phi = self.get_parameter('margin_phi').value
         self.human_cbf = DpaxCapsuleCBF(
-            gamma=gamma, margin_phi=margin_phi,
+            gamma=hr_gamma, margin_phi=hr_margin_phi,
         )
 
         # Optional box obstacle CBF
         beta = self.get_parameter('beta').value
-        self.box_cbf = DpaxBoxCBF(gamma=gamma, beta=beta)
+        self.box_cbf = DpaxBoxCBF(gamma=hr_gamma, beta=beta)
 
         self.get_logger().info('dpax CBFs ready')
 
