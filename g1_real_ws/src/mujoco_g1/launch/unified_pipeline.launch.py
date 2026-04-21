@@ -51,10 +51,15 @@ def generate_launch_description():
         "g1_29dof.urdf",
     ])
 
-    rviz_config = PathJoinSubstitution([
+    sim_rviz_config = PathJoinSubstitution([
         FindPackageShare("g1_cbf"),
         "rviz",
-        "config.rviz",
+        "config_sim.rviz",
+    ])
+    real_rviz_config = PathJoinSubstitution([
+        FindPackageShare("g1_cbf"),
+        "rviz",
+        "config_real.rviz",
     ])
 
     # -------- compound conditions --------
@@ -77,9 +82,13 @@ def generate_launch_description():
             ghost, "' == 'true'"
         ])
     )
-    rviz_cond = IfCondition(
-        PythonExpression(["'", rviz, "' == 'true' and '", use_cbf, "' == 'true'"])
-    )  # only launch rviz if we're running cbf in either sim or real, since that's the main use case for visualization
+    # only launch rviz if we're running cbf in either sim or real, since that's the main use case for visualization
+    rviz_cond_sim = IfCondition(
+        PythonExpression(["'", rviz, "' == 'true' and '", use_cbf, "' == 'true' and '", run_sim, "' == 'true'"])
+    )  
+    rviz_cond_real = IfCondition(
+        PythonExpression(["'", rviz, "' == 'true' and '", use_cbf, "' == 'true' and '", run_real, "' == 'true'"])
+    )
 
     return LaunchDescription([
         # ---------------- launch args ----------------
@@ -358,8 +367,16 @@ def generate_launch_description():
             executable="rviz2",
             name="rviz2",
             output="screen",
-            condition=rviz_cond,
-            arguments=["-d", rviz_config],
+            condition=rviz_cond_sim,
+            arguments=["-d", sim_rviz_config],
+        ),
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            output="screen",
+            condition=rviz_cond_real,
+            arguments=["-d", real_rviz_config],
         ),
 
         # ============================================================
