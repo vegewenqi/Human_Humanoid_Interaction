@@ -102,7 +102,7 @@ class G1ArmSdkBridge : public rclcpp::Node {
     SHUTDOWN_RELEASE
   };
 
-  static constexpr double kPoseArrivalToleranceRad = 2e-3;
+  static constexpr double kPoseArrivalToleranceRad = 0.08;  // ~4.58deg
   static constexpr float kWeightDoneEps = 1e-4F;
 
   static double Clamp(double x, double lo, double hi) {
