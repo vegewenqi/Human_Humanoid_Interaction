@@ -285,6 +285,7 @@ def generate_launch_description():
                     "hr_margin_phi": 0.03,
                     "rr_gamma": 2.0,
                     "hr_gamma": 2.0,
+                    # "use_gpu": True,
                     # "enable_human_collision": False
                 }
             ],
@@ -459,6 +460,7 @@ def generate_launch_description():
                     "hr_margin_phi": 0.03,
                     "rr_gamma": 2.0,
                     "hr_gamma": 2.0,
+                    # "use_gpu": True,
                 }
             ],
         ),

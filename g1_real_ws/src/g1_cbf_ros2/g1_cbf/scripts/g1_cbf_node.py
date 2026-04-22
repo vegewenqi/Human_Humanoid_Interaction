@@ -93,6 +93,14 @@ class G1CBFNode(Node):
         use_gpu = self.get_parameter('use_gpu').value
         os.environ['JAX_PLATFORMS'] = 'cuda' if use_gpu else 'cpu'
         os.environ['JAX_ENABLE_X64'] = '1'
+        try:
+            import jax
+            self.get_logger().info(f"JAX_PLATFORMS={os.environ.get('JAX_PLATFORMS')}")
+            self.get_logger().info(f"JAX backend={jax.default_backend()}")
+            self.get_logger().info(f"JAX devices={jax.devices()}")
+        except Exception as e:
+            self.get_logger().error(f"JAX precheck failed: {e}")
+            raise
         from g1_cbf.cbf import DpaxCapsuleCBF, DpaxBoxCBF  # noqa: E402
 
         dt = self.get_parameter('dt').value
