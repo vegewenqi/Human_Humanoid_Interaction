@@ -21,6 +21,7 @@ void parseArgs(int argc, char **argv, InitParameters &param);
 static inline bool valid2D(const sl::float2 &pt);
 static inline bool valid3D(const sl::float3 &pt);
 static inline float dist3D(const sl::float3 &a, const sl::float3 &b);
+static inline int selectBestBodyIndex(const sl::Bodies &bodies);
 static inline double now_sec();
 
 bool record_video = false;
@@ -29,7 +30,8 @@ int main(int argc, char **argv)
 {
     Camera zed;
     InitParameters init_parameters;
-    init_parameters.camera_resolution = RESOLUTION::AUTO;
+    init_parameters.camera_resolution = RESOLUTION::HD1080;
+    init_parameters.camera_fps = 60;
     init_parameters.depth_mode = DEPTH_MODE::NEURAL;
     init_parameters.coordinate_system = COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FWD;
 
@@ -49,7 +51,8 @@ int main(int argc, char **argv)
     auto pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("/skeleton/points", 10);
     auto pub_conf  = node->create_publisher<std_msgs::msg::UInt8>("/skeleton/confidence", 10);
     auto pub_orient = node->create_publisher<std_msgs::msg::Float32MultiArray>("/skeleton/local_orientations", 10);
-    RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence, /skeleton/local_orientations");
+    // RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence, /skeleton/local_orientations");
+    RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence");
 
     PositionalTrackingParameters positional_tracking_parameters;
     positional_tracking_parameters.set_as_static = true;
@@ -65,11 +68,11 @@ int main(int argc, char **argv)
 
     BodyTrackingParameters body_tracker_params;
     body_tracker_params.enable_tracking = true;
-    body_tracker_params.enable_body_fitting = true;
+    body_tracker_params.enable_body_fitting = false;
     body_tracker_params.body_format = sl::BODY_FORMAT::BODY_38;
-    body_tracker_params.enable_segmentation = true;
+    body_tracker_params.enable_segmentation = false;
     body_tracker_params.detection_model = BODY_TRACKING_MODEL::HUMAN_BODY_FAST;
-    // body_tracker_params.allow_reduced_precision_inference = true;
+    body_tracker_params.allow_reduced_precision_inference = true;
 
     returned_state = zed.enableBodyTracking(body_tracker_params);
     if (returned_state != ERROR_CODE::SUCCESS)
@@ -108,6 +111,7 @@ int main(int argc, char **argv)
     string window_name = "ZEDposeDetect";
     int key_wait = 10;
     char key = ' ';
+    int frame_id = 0;
 
     using clock_t = std::chrono::high_resolution_clock;
     auto prev_time = clock_t::now();
@@ -121,23 +125,31 @@ int main(int argc, char **argv)
         auto err = zed.grab();
         if (err <= ERROR_CODE::SUCCESS)
         {
+            frame_id++;
+
+            // get skeleton every frame
             zed.retrieveBodies(bodies, body_tracker_parameters_rt);
 
-            zed.retrieveImage(image_left, VIEW::LEFT, MEM::CPU, display_resolution);
-            zed.getPosition(cam_pose, REFERENCE_FRAME::WORLD);
+            int best_idx = selectBestBodyIndex(bodies);
 
-            viewer.updateData(bodies, cam_pose.pose_data);
+            Bodies single_body;
+            single_body.is_new = bodies.is_new;
+            single_body.is_tracked = bodies.is_tracked;
 
-            // Publish first tracked body (MVP): bodies.body_list[0]
-            if (!bodies.body_list.empty()) {
-                const auto &body = bodies.body_list[0];
+            if (best_idx >= 0)
+            {
+                single_body.body_list.push_back(bodies.body_list[best_idx]);
+            }
 
-                // PointCloud2 with 38 xyz points
+            // publish points / confidence every frame
+            if (!single_body.body_list.empty()) {
+                const auto &body = single_body.body_list[0];
+
                 sensor_msgs::msg::PointCloud2 cloud;
                 cloud.header.stamp = node->get_clock()->now();
                 cloud.header.frame_id = "zed_world";
                 cloud.height = 1;
-                cloud.width = static_cast<uint32_t>(body.keypoint.size()); // should be 38 for BODY_38
+                cloud.width = static_cast<uint32_t>(body.keypoint.size());
                 cloud.is_dense = false;
 
                 sensor_msgs::PointCloud2Modifier modifier(cloud);
@@ -150,7 +162,6 @@ int main(int argc, char **argv)
 
                 for (size_t i = 0; i < body.keypoint.size(); ++i, ++iter_x, ++iter_y, ++iter_z) {
                     const sl::float3 &p = body.keypoint[i];
-                    // Keep NaN/Inf as-is; subscriber can filter. Or set to NaN if invalid.
                     *iter_x = p.x;
                     *iter_y = p.y;
                     *iter_z = p.z;
@@ -158,121 +169,123 @@ int main(int argc, char **argv)
 
                 pub_cloud->publish(cloud);
 
-                // confidence (0-100)
                 std_msgs::msg::UInt8 conf;
-                // ZED SDK BodyData typically provides `confidence`
                 conf.data = static_cast<uint8_t>(std::max(0, std::min(100, (int)body.confidence)));
                 pub_conf->publish(conf);
 
-                // local orientations: flatten as [x,y,z,w, x,y,z,w, ...] for BODY_38
-                std_msgs::msg::Float32MultiArray orient_msg;
-                orient_msg.data.reserve(body.local_orientation_per_joint.size() * 4);
+                // // local orientations: flatten as [x,y,z,w, x,y,z,w, ...] for BODY_38
+                // std_msgs::msg::Float32MultiArray orient_msg;
+                // orient_msg.data.reserve(body.local_orientation_per_joint.size() * 4);
 
-                for (size_t i = 0; i < body.local_orientation_per_joint.size(); ++i) {
-                    const auto &q = body.local_orientation_per_joint[i];
-                    orient_msg.data.push_back(q.x);
-                    orient_msg.data.push_back(q.y);
-                    orient_msg.data.push_back(q.z);
-                    orient_msg.data.push_back(q.w);
-                }
+                // for (size_t i = 0; i < body.local_orientation_per_joint.size(); ++i) {
+                //     const auto &q = body.local_orientation_per_joint[i];
+                //     orient_msg.data.push_back(q.x);
+                //     orient_msg.data.push_back(q.y);
+                //     orient_msg.data.push_back(q.z);
+                //     orient_msg.data.push_back(q.w);
+                // }
 
-                pub_orient->publish(orient_msg);
+                // pub_orient->publish(orient_msg);
             }
 
-            // Allow ROS2 to process callbacks
             rclcpp::spin_some(node);
 
-            // printf("bodies is tracked %d \n", bodies.is_tracked);
-            render_2D(image_left_ocv, img_scale, bodies.body_list, bodies.is_tracked);
-
-            if (bodies.body_list.size() >= 2)
+            // render dispaly at lower frame rate
+            if (frame_id % 5 == 0)
             {
+                zed.retrieveImage(image_left, VIEW::LEFT, MEM::CPU, display_resolution);
+                zed.getPosition(cam_pose, REFERENCE_FRAME::WORLD);
+                viewer.updateData(single_body, cam_pose.pose_data);
 
-                const auto &bodyA = bodies.body_list[0];
-                const auto &bodyB = bodies.body_list[1];
+                render_2D(image_left_ocv, img_scale, single_body.body_list, single_body.is_tracked);
+                // we track only one person for now
+                // if (bodies.body_list.size() >= 2)
+                // {
+                //     const auto &bodyA = bodies.body_list[0];
+                //     const auto &bodyB = bodies.body_list[1];
 
-                static const std::vector<int> joint_indices = {
-                    10, 11, 12, 13, 14, 15, 16, 17};
+                //     static const std::vector<int> joint_indices = {
+                //         10, 11, 12, 13, 14, 15, 16, 17};
 
-                for (int idx : joint_indices)
+                //     for (int idx : joint_indices)
+                //     {
+                //         const sl::float2 &JA_2D = bodyA.keypoint_2d[idx];
+                //         const sl::float2 &JB_2D = bodyB.keypoint_2d[idx];
+
+                //         if (!valid2D(JA_2D) || !valid2D(JB_2D))
+                //         {
+                //             continue;
+                //         }
+
+                //         const sl::float3 &JA_3D = bodyA.keypoint[idx];
+                //         const sl::float3 &JB_3D = bodyB.keypoint[idx];
+
+                //         float dist = -1.f;
+                //         if (valid3D(JA_3D) && valid3D(JB_3D))
+                //         {
+                //             dist = dist3D(JA_3D, JB_3D);
+                //         }
+
+                //         cv::Point A((int)JA_2D.x, (int)JA_2D.y);
+                //         cv::Point B((int)JB_2D.x, (int)JB_2D.y);
+
+                //         cv::line(image_left_ocv, A, B, cv::Scalar(0, 255, 0), 2);
+                //         cv::circle(image_left_ocv, A, 4, cv::Scalar(0, 0, 255), -1);
+                //         cv::circle(image_left_ocv, B, 4, cv::Scalar(255, 0, 0), -1);
+                //     }
+                // }
+
+                auto now = clock_t::now();
+                float dt = std::chrono::duration<float>(now - prev_time).count();
+                prev_time = now;
+
+                if (dt > 0.f)
                 {
-
-                    const sl::float2 &JA_2D = bodyA.keypoint_2d[idx];
-                    const sl::float2 &JB_2D = bodyB.keypoint_2d[idx];
-
-                    if (!valid2D(JA_2D) || !valid2D(JB_2D))
-                    {
-                        continue;
-                    }
-
-                    const sl::float3 &JA_3D = bodyA.keypoint[idx];
-                    const sl::float3 &JB_3D = bodyB.keypoint[idx];
-
-                    float dist = -1.f;
-                    if (valid3D(JA_3D) && valid3D(JB_3D))
-                    {
-                        dist = dist3D(JA_3D, JB_3D);
-                    }
-
-                    cv::Point A((int)JA_2D.x, (int)JA_2D.y);
-                    cv::Point B((int)JB_2D.x, (int)JB_2D.y);
-
-                    cv::line(image_left_ocv, A, B, cv::Scalar(0, 255, 0), 2);
-                    cv::circle(image_left_ocv, A, 4, cv::Scalar(0, 0, 255), -1);
-                    cv::circle(image_left_ocv, B, 4, cv::Scalar(255, 0, 0), -1);
+                    fps = 1.f / dt;
                 }
-            }
 
-            auto now = clock_t::now();
-            float dt = std::chrono::duration<float>(now - prev_time).count();
-            prev_time = now;
+                cv::putText(
+                    image_left_ocv,
+                    std::to_string((int)fps) + " FPS",
+                    cv::Point(10, 70),
+                    cv::FONT_HERSHEY_COMPLEX,
+                    1.0,
+                    cv::Scalar(0, 0, 255),
+                    2);
 
-            if (dt > 0.f)
-            {
-                fps = 1.f / dt;
-            }
-
-            cv::putText(
-                image_left_ocv,
-                std::to_string((int)fps) + " FPS",
-                cv::Point(10, 70),
-                cv::FONT_HERSHEY_COMPLEX,
-                1.0,
-                cv::Scalar(0, 0, 255),
-                2);
-
-            if (record_video == true)
-            {
-                cv::Mat frame_bgr;
-                cv::cvtColor(image_left_ocv, frame_bgr, cv::COLOR_BGRA2BGR);
-                frames_2D.push_back(frame_bgr.clone());
-                timestamps.push_back(now_sec());
-
-                std::vector<std::vector<sl::float3>> frame_points;
-                for (const auto &body : bodies.body_list)
+                if (record_video == true)
                 {
-                    std::vector<sl::float3> joints;
-                    for (const auto &j : body.keypoint)
-                        joints.push_back(j);
-                    frame_points.push_back(joints);
+                    cv::Mat frame_bgr;
+                    cv::cvtColor(image_left_ocv, frame_bgr, cv::COLOR_BGRA2BGR);
+                    frames_2D.push_back(frame_bgr.clone());
+                    timestamps.push_back(now_sec());
+
+                    std::vector<std::vector<sl::float3>> frame_points;
+                    for (const auto &body : bodies.body_list)
+                    {
+                        std::vector<sl::float3> joints;
+                        for (const auto &j : body.keypoint)
+                            joints.push_back(j);
+                        frame_points.push_back(joints);
+                    }
                 }
-            }
 
-            cv::imshow(window_name, image_left_ocv);
+                cv::imshow(window_name, image_left_ocv);
 
-            key = cv::waitKey(key_wait);
+                key = cv::waitKey(1);
 
-            if (key == 'q')
-            {
-                quit = true;
-            }
-            if (key == 'p')
-            {
-                key_wait = (key_wait > 0) ? 0 : 10;
-            }
-            if (!viewer.isAvailable())
-            {
-                quit = true;
+                if (key == 'q')
+                {
+                    quit = true;
+                }
+                if (key == 'p')
+                {
+                    key_wait = (key_wait > 0) ? 0 : 10;
+                }
+                if (!viewer.isAvailable())
+                {
+                    quit = true;
+                }
             }
         }
         else if (err == sl::ERROR_CODE::END_OF_SVOFILE_REACHED)
@@ -323,6 +336,24 @@ int main(int argc, char **argv)
     rclcpp::shutdown();
 
     return EXIT_SUCCESS;
+}
+
+static inline int selectBestBodyIndex(const sl::Bodies &bodies)
+{
+    if (bodies.body_list.empty()) return -1;
+
+    int best_idx = 0;
+    int best_conf = bodies.body_list[0].confidence;
+
+    for (int i = 1; i < (int)bodies.body_list.size(); ++i)
+    {
+        if (bodies.body_list[i].confidence > best_conf)
+        {
+            best_conf = bodies.body_list[i].confidence;
+            best_idx = i;
+        }
+    }
+    return best_idx;
 }
 
 static inline bool valid2D(const sl::float2 &pt)
