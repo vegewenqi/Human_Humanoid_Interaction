@@ -89,8 +89,10 @@ class G1CBFNode(Node):
         self.declare_parameter('enable_self_collision', True)
         self.declare_parameter('enable_human_collision', True)
         self.declare_parameter('enable_box_obstacles', False)
+        self.declare_parameter('enable_coarse_gating', True)
+        self.declare_parameter('coarse_distance_activate', 0.60)  
 
-        # New runtime / debug switches
+        # Runtime / debug switches
         self.declare_parameter('enable_robot_caps_viz', True)
         self.declare_parameter('enable_distance_viz', True)
         self.declare_parameter('log_summary', False)
@@ -133,6 +135,12 @@ class G1CBFNode(Node):
         self.enable_box_obstacles = bool(
             self.get_parameter('enable_box_obstacles').value
         )
+        self.enable_coarse_gating = bool(
+            self.get_parameter('enable_coarse_gating').value
+        )
+        self.coarse_distance_activate = float(
+            self.get_parameter('coarse_distance_activate').value
+        )
         self.enable_robot_caps_viz = bool(self.get_parameter('enable_robot_caps_viz').value)
         self.enable_distance_viz = bool(
             self.get_parameter('enable_distance_viz').value
@@ -152,6 +160,11 @@ class G1CBFNode(Node):
             f'hr_gamma={hr_gamma}, hr_margin_phi={hr_margin_phi}, self_geom={self.geom_type}'
         )
         self.get_logger().info(
+            f'enable_self_collision={self.enable_self_collision}, '
+            f'enable_human_collision={self.enable_human_collision}, '
+            f'enable_box_obstacles={self.enable_box_obstacles}, '
+            f'coarse_gating: enable={self.enable_coarse_gating}, '
+            f'd_activate={self.coarse_distance_activate:.3f} m, '
             f'viz: enable_robot_caps_viz={self.enable_robot_caps_viz}, '
             f'enable_distance_viz={self.enable_distance_viz}, '
             f'log_summary={self.log_summary}, '
@@ -505,19 +518,25 @@ class G1CBFNode(Node):
     def _build_capsule_constraints(self, robot_endpoints, constraints, closest_points):
         for nameA, nameB in COLLISION_PAIRS:
             eA, eB = robot_endpoints[nameA], robot_endpoints[nameB]
-
+            if not self._pair_is_active_by_center_distance(
+                eA['a'], eA['b'], eB['a'], eB['b']
+            ):
+                continue
             phi, A_row, b_val, p1, p2 = self.self_cbf.build_constraint(
                 eA['radius'], eA['a'], eA['b'],
                 eA['J_a'], eA['J_b'],
                 eB['radius'], eB['a'], eB['b'],
                 eB['J_a'], eB['J_b'],
+                need_closest_points=self.enable_distance_viz,
             )
             constraints.append((A_row, b_val))
-            closest_points.append((p1, p2))
+            if p1 is not None and p2 is not None:
+                closest_points.append((p1, p2))
 
     def _build_human_capsule_constraints(
         self, robot_endpoints, constraints, closest_points
     ):
+        zero_J_template = None
         for robot_name, human_name in ROBOT_HUMAN_COLLISION_PAIRS:
             if robot_name not in robot_endpoints:
                 self.get_logger().warn(
@@ -525,25 +544,33 @@ class G1CBFNode(Node):
                     throttle_duration_sec=2.0,
                 )
                 continue
-
             if human_name not in self.human_capsules:
                 continue
 
             eR = robot_endpoints[robot_name]
             eH = self.human_capsules[human_name]
 
+            if not self._pair_is_active_by_center_distance(
+                eR['a'], eR['b'], eH['a'], eH['b']
+            ):
+                continue
+
             # human capsule treated as static wrt robot command
-            J_zero_a = np.zeros_like(eR['J_a'])
-            J_zero_b = np.zeros_like(eR['J_b'])
+            if zero_J_template is None:
+                zero_J_template = np.zeros_like(eR['J_a'])
+            J_zero_a = zero_J_template
+            J_zero_b = zero_J_template
 
             phi, A_row, b_val, p1, p2 = self.human_cbf.build_constraint(
                 eR['radius'], eR['a'], eR['b'],
                 eR['J_a'], eR['J_b'],
                 eH['radius'], eH['a'], eH['b'],
                 J_zero_a, J_zero_b,
+                need_closest_points=self.enable_distance_viz,
             )
             constraints.append((A_row, b_val))
-            closest_points.append((p1, p2))
+            if p1 is not None and p2 is not None:
+                closest_points.append((p1, p2))
 
     def _build_box_constraints(self, constraints, closest_points):
         for nameA, nameB in COLLISION_PAIRS:
@@ -623,6 +650,17 @@ class G1CBFNode(Node):
                 return None
             q[i] = name_to_pos[jname]
         return q
+    
+    def _capsule_center(self, a, b):
+        return 0.5 * (a + b)
+
+    def _pair_is_active_by_center_distance(self, a1, b1, a2, b2):
+        if not self.enable_coarse_gating:
+            return True
+        c1 = self._capsule_center(a1, b1)
+        c2 = self._capsule_center(a2, b2)
+        d_center = np.linalg.norm(c1 - c2)
+        return d_center < self.coarse_distance_activate
 
 
 def main(args=None):

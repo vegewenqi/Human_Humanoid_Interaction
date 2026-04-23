@@ -61,6 +61,8 @@ class DpaxCapsuleCBF:
         self,
         R1, a1, b1, J_a1, J_b1,
         R2, a2, b2, J_a2, J_b2,
+        *,
+        need_closest_points=False,
         **kwargs,
     ):
         """Build capsule CBF constraint.
@@ -90,10 +92,13 @@ class DpaxCapsuleCBF:
         b_val = -self.gamma * h
 
         # Closest points on centerlines
-        Q, q, _ = get_cost_terms(a1_j, b1_j, a2_j, b2_j)
-        z = active_set_qp(Q, q)
-        p1 = np.asarray(b1_j + z[0] * (a1_j - b1_j))
-        p2 = np.asarray(b2_j + z[1] * (a2_j - b2_j))
+        p1 = None
+        p2 = None
+        if need_closest_points:
+            Q, q, _ = get_cost_terms(a1_j, b1_j, a2_j, b2_j)
+            z = active_set_qp(Q, q)
+            p1 = np.asarray(b1_j + z[0] * (a1_j - b1_j))
+            p2 = np.asarray(b2_j + z[1] * (a2_j - b2_j))
 
         return phi, A_row, b_val, p1, p2
 

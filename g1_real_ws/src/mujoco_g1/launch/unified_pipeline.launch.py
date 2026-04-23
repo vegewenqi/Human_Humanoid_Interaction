@@ -296,6 +296,8 @@ def generate_launch_description():
                     "enable_distance_viz": True,
                     "log_summary": True,
                     "summary_period_sec": 1.0,
+                    "enable_coarse_gating": True,
+                    "coarse_distance_activate": 0.60,
                 }
             ],
         ),
@@ -485,9 +487,11 @@ def generate_launch_description():
                     # "use_gpu": True,
 
                     "enable_robot_caps_viz": False,
-                    "enable_distance_viz": False,
+                    "enable_distance_viz": True,
                     "log_summary": True,
                     "summary_period_sec": 1.0,
+                    "enable_coarse_gating": True,
+                    "coarse_distance_activate": 0.60,
                 }
             ],
         ),
