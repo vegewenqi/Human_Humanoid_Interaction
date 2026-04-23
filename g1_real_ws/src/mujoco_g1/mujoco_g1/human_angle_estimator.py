@@ -29,6 +29,11 @@ class HumanAngleEstimatorNode(Node):
         self.declare_parameter("startup_delay_sec", 5.0)
         self.declare_parameter("log_output", "raw")  # "raw" | "delta" | "both"
 
+        self.declare_parameter("debug_log", False)
+        self.declare_parameter("debug_log_period_sec", 1.0)
+        self.debug_log = bool(self.get_parameter("debug_log").value)
+        self.debug_log_period_sec = float(self.get_parameter("debug_log_period_sec").value)
+
         self.input_points_topic = str(self.get_parameter("input_points_topic").value)
         self.input_conf_topic = str(self.get_parameter("input_conf_topic").value)
 
@@ -263,14 +268,18 @@ class HumanAngleEstimatorNode(Node):
                     )
 
             if self.log_output in ["raw", "both"]:
-                self.get_logger().info(
-                    self._format_angle_line(raw_data, prefix="raw_", unit=unit)
-                )
+                if self.debug_log:
+                    self.get_logger().info(
+                        self._format_angle_line(raw_data, prefix="raw_", unit=unit),
+                        throttle_duration_sec=self.debug_log_period_sec,
+                    )
 
             if self.log_output in ["delta", "both"]:
-                self.get_logger().info(
-                    self._format_angle_line(delta_data, prefix="delta_", unit=unit)
-                )
+                if self.debug_log:
+                    self.get_logger().info(
+                        self._format_angle_line(delta_data, prefix="delta_", unit=unit),
+                        throttle_duration_sec=self.debug_log_period_sec,
+                    )
 
             self.last_log_t = now
 

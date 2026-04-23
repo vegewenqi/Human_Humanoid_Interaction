@@ -215,6 +215,8 @@ def generate_launch_description():
                 "input_points_topic": skeleton_points_filtered_topic,
                 "input_conf_topic": "/skeleton/confidence",
                 "min_confidence": 40,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
@@ -227,6 +229,8 @@ def generate_launch_description():
             parameters=[{
                 "output_topic": qdes_nominal_topic,
                 "unsafe_joint_command_topic": unsafe_joint_command_topic,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
@@ -285,8 +289,13 @@ def generate_launch_description():
                     "hr_margin_phi": 0.03,
                     "rr_gamma": 2.0,
                     "hr_gamma": 2.0,
+
                     # "use_gpu": True,
-                    # "enable_human_collision": False
+
+                    "enable_robot_caps_viz": True,
+                    "enable_distance_viz": True,
+                    "log_summary": True,
+                    "summary_period_sec": 1.0,
                 }
             ],
         ),
@@ -425,6 +434,9 @@ def generate_launch_description():
                 "q_home_8": [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708],
                 "q_min_8": [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472],
                 "q_max_8": [0.52, 0.52,  2.6704,  2.2515,  2.0944,  2.6704,  1.5882,  2.0944],
+
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
@@ -470,12 +482,12 @@ def generate_launch_description():
                     "rr_gamma": 2.0,
                     "hr_gamma": 2.0,
 
+                    # "use_gpu": True,
+
                     "enable_robot_caps_viz": False,
                     "enable_distance_viz": False,
                     "log_summary": True,
                     "summary_period_sec": 1.0,
-
-                    # "use_gpu": True,
                 }
             ],
         ),
@@ -532,6 +544,9 @@ def generate_launch_description():
                 "q_home_8": [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708],
                 "q_min_8": [-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472],
                 "q_max_8": [0.52, 0.52,  2.6704,  2.2515,  2.0944,  2.6704,  1.5882,  2.0944],
+                
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 

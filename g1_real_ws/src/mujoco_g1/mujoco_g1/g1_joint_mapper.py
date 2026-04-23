@@ -87,6 +87,11 @@ class G1JointMapperNode(Node):
             [0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944]
         )
 
+        self.declare_parameter("debug_log", False)
+        self.declare_parameter("debug_log_period_sec", 1.0)
+        self.debug_log = bool(self.get_parameter("debug_log").value)
+        self.debug_log_period_sec = float(self.get_parameter("debug_log_period_sec").value)
+
         self.input_topic = str(self.get_parameter("input_topic").value)
         self.output_topic = str(self.get_parameter("output_topic").value)
         self.unsafe_joint_command_topic = str(self.get_parameter("unsafe_joint_command_topic").value)
@@ -196,21 +201,25 @@ class G1JointMapperNode(Node):
         if (now - self.last_log_time).nanoseconds * 1e-9 > 1.0:
             if self.log_output in ["human", "both"]:
                 human_disp = np.rad2deg(theta_delta)
-                self.get_logger().info(
-                    "[human_delta_deg] "
-                    f"torso_roll={human_disp[0]:.2f}, torso_pitch={human_disp[1]:.2f}, "
-                    f"l_sh_pitch={human_disp[2]:.2f}, l_sh_roll={human_disp[3]:.2f}, l_el_pitch={human_disp[4]:.2f}, "
-                    f"r_sh_pitch={human_disp[5]:.2f}, r_sh_roll={human_disp[6]:.2f}, r_el_pitch={human_disp[7]:.2f}"
-                )
+                if self.debug_log:
+                    self.get_logger().info(
+                        "[human_delta_deg] "
+                        f"torso_roll={human_disp[0]:.2f}, torso_pitch={human_disp[1]:.2f}, "
+                        f"l_sh_pitch={human_disp[2]:.2f}, l_sh_roll={human_disp[3]:.2f}, l_el_pitch={human_disp[4]:.2f}, "
+                        f"r_sh_pitch={human_disp[5]:.2f}, r_sh_roll={human_disp[6]:.2f}, r_el_pitch={human_disp[7]:.2f}",
+                        throttle_duration_sec=self.debug_log_period_sec,
+                    )
 
             if self.log_output in ["qdes", "both"]:
                 q_disp = np.rad2deg(q_des)
-                self.get_logger().info(
-                    "[g1_q_des_deg] "
-                    f"waist_roll={q_disp[0]:.2f}, waist_pitch={q_disp[1]:.2f}, "
-                    f"l_sh_pitch={q_disp[2]:.2f}, l_sh_roll={q_disp[3]:.2f}, l_elbow={q_disp[4]:.2f}, "
-                    f"r_sh_pitch={q_disp[5]:.2f}, r_sh_roll={q_disp[6]:.2f}, r_elbow={q_disp[7]:.2f}"
-                )
+                if self.debug_log:
+                    self.get_logger().info(
+                        "[g1_q_des_deg] "
+                        f"waist_roll={q_disp[0]:.2f}, waist_pitch={q_disp[1]:.2f}, "
+                        f"l_sh_pitch={q_disp[2]:.2f}, l_sh_roll={q_disp[3]:.2f}, l_elbow={q_disp[4]:.2f}, "
+                        f"r_sh_pitch={q_disp[5]:.2f}, r_sh_roll={q_disp[6]:.2f}, r_elbow={q_disp[7]:.2f}",
+                        throttle_duration_sec=self.debug_log_period_sec,
+                    )
 
             self.last_log_time = now
 

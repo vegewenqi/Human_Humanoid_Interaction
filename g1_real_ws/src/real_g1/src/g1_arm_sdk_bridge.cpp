@@ -247,6 +247,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
         "q_min_8", {-0.52, -0.52, -3.0892, -1.5882, -1.0472, -3.0892, -2.2515, -1.0472});
     this->declare_parameter<std::vector<double>>(
         "q_max_8", {0.52, 0.52, 2.6704, 2.2515, 2.0944, 2.6704, 1.5882, 2.0944});
+
+    this->declare_parameter<bool>("debug_log", false);
+    this->declare_parameter<double>("debug_log_period_sec", 1.0);
   }
 
   void ReadParameters() {
@@ -307,6 +310,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
     max_joint_delta_ = max_joint_velocity_ * control_dt_;
     home_max_joint_delta_ = home_transition_velocity_ * control_dt_;
     shutdown_max_joint_delta_ = shutdown_return_velocity_ * control_dt_;
+
+    debug_log_ = this->get_parameter("debug_log").as_bool();
+    debug_log_period_sec_ = this->get_parameter("debug_log_period_sec").as_double();
   }
 
   void InitializeStorage() {
@@ -833,8 +839,11 @@ class G1ArmSdkBridge : public rclcpp::Node {
         case BridgeMode::SHUTDOWN_RELEASE: mode_str = "shutdown_release"; break;
       }
 
-      RCLCPP_INFO(
-          this->get_logger(),
+      if (debug_log_) {
+        RCLCPP_INFO_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          static_cast<int>(debug_log_period_sec_ * 1000.0),
           "[bridge] mode=%s weight=%.2f fresh=%s | q8_target_deg: wr=%.1f wp=%.1f lsp=%.1f lsr=%.1f le=%.1f rsp=%.1f rsr=%.1f re=%.1f | meas_waist_deg: yaw=%.1f roll=%.1f pitch=%.1f",
           mode_str,
           weight_,
@@ -849,7 +858,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
           Rad2Deg(q_target_safe_8_[7]),
           Rad2Deg(current_jpos_meas_[14]),
           Rad2Deg(current_jpos_meas_[15]),
-          Rad2Deg(current_jpos_meas_[16]));
+          Rad2Deg(current_jpos_meas_[16])
+        );
+      }
       last_log_time_ = now;
     }
   }
@@ -927,6 +938,9 @@ class G1ArmSdkBridge : public rclcpp::Node {
   bool safe_stop_done_{};
   bool startup_snapshot_logged_{};
   float weight_{};
+
+  bool debug_log_{false};
+  double debug_log_period_sec_{1.0};
 
   BridgeMode phase_{BridgeMode::WAIT_FOR_LOWSTATE};
 
