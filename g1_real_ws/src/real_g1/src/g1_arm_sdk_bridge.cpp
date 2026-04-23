@@ -121,6 +121,84 @@ class G1ArmSdkBridge : public rclcpp::Node {
     return rad * 180.0 / kPi;
   }
 
+  std::vector<double> ApplyWaistBalanceOffset(const std::vector<double> &q8) const {
+    std::vector<double> out = q8;
+    if (out.size() != 8 || !enable_waist_balance_offset_) {
+      return out;
+    }
+
+    // q8 layout:
+    // [0] waist_roll
+    // [1] waist_pitch
+    // [2] left_shoulder_pitch
+    // [3] left_shoulder_roll
+    // [4] left_elbow
+    // [5] right_shoulder_pitch
+    // [6] right_shoulder_roll
+    // [7] right_elbow
+
+    const double lsp = q8[2];
+    const double lsr = q8[3];
+    const double rsp = q8[5];
+    const double rsr = q8[6];
+
+    // shoulder pitch:
+    // forward  -> negative
+    // backward -> positive
+    // convert to sagittal amount:
+    // forward  -> positive
+    // backward -> negative
+    const double l_sag = -lsp;
+    const double r_sag = -rsp;
+
+    // 1) pitch compensation from sagittal mean
+    const double sag_mean = 0.5 * (l_sag + r_sag);
+    double pitch_offset = -waist_pitch_balance_gain_ * sag_mean;
+    pitch_offset = Clamp(
+        pitch_offset,
+        -waist_pitch_balance_limit_,
+        waist_pitch_balance_limit_);
+
+    // 2) roll compensation from sagittal asymmetry
+    // use a soft weight instead of hard gating:
+    // - both forward / both backward -> weight close to 1
+    // - one forward + one backward with similar magnitude -> weight close to 0
+    // - one forward a lot + one backward a little -> still nonzero
+    const double sagittal_asym = l_sag - r_sag;
+    const double sag_abs_sum = std::abs(l_sag) + std::abs(r_sag);
+    const double same_direction_weight =
+        (sag_abs_sum > 1e-6) ? (std::abs(l_sag + r_sag) / sag_abs_sum) : 0.0;
+
+    double roll_offset_from_pitch =
+        waist_roll_from_pitch_asym_gain_ * sagittal_asym * same_direction_weight;
+    roll_offset_from_pitch = Clamp(
+        roll_offset_from_pitch,
+        -waist_roll_from_pitch_asym_limit_,
+        waist_roll_from_pitch_asym_limit_);
+
+    // 3) roll compensation from side abduction asymmetry
+    // left side-open  -> lsr > 0
+    // right side-open -> rsr < 0
+    const double l_abduction = std::max(0.0, lsr);
+    const double r_abduction = std::max(0.0, -rsr);
+    const double side_asym = l_abduction - r_abduction;
+
+    double roll_offset_from_roll =
+        waist_roll_from_roll_asym_gain_ * side_asym;
+    roll_offset_from_roll = Clamp(
+        roll_offset_from_roll,
+        -waist_roll_from_roll_asym_limit_,
+        waist_roll_from_roll_asym_limit_);
+
+    const double total_roll_offset =
+        roll_offset_from_pitch + roll_offset_from_roll;
+
+    out[1] = Clamp(out[1] + pitch_offset, q_min_8_[1], q_max_8_[1]);
+    out[0] = Clamp(out[0] + total_roll_offset, q_min_8_[0], q_max_8_[0]);
+
+    return out;
+  }
+
   void DeclareParameters() {
     this->declare_parameter<std::string>("qdes_topic", "/g1_upperbody_q_des_safe");
     this->declare_parameter<bool>("qdes_in_degrees", false);
@@ -137,6 +215,17 @@ class G1ArmSdkBridge : public rclcpp::Node {
     this->declare_parameter<double>("kd_waist", 1.5);
     this->declare_parameter<double>("dq", 0.0);
     this->declare_parameter<double>("tau_ff", 0.0);
+
+    this->declare_parameter<bool>("enable_waist_balance_offset", true);
+    // 双臂/单臂前举 -> waist pitch 后仰补偿
+    this->declare_parameter<double>("waist_pitch_balance_gain", -0.12);
+    this->declare_parameter<double>("waist_pitch_balance_limit", 0.20);
+    // 左右前举不对称 -> waist roll 反向补偿
+    this->declare_parameter<double>("waist_roll_from_pitch_asym_gain", -0.04);
+    this->declare_parameter<double>("waist_roll_from_pitch_asym_limit", 0.08);
+    // 左右侧伸不对称 -> waist roll 反向补偿
+    this->declare_parameter<double>("waist_roll_from_roll_asym_gain", -0.10);
+    this->declare_parameter<double>("waist_roll_from_roll_asym_limit", 0.12);
 
     this->declare_parameter<double>("weight_active", 1.0);
     this->declare_parameter<double>("weight_acquire_rate", 0.20);
@@ -176,6 +265,21 @@ class G1ArmSdkBridge : public rclcpp::Node {
     kd_waist_ = this->get_parameter("kd_waist").as_double();
     dq_ = this->get_parameter("dq").as_double();
     tau_ff_ = this->get_parameter("tau_ff").as_double();
+
+    enable_waist_balance_offset_ =
+        this->get_parameter("enable_waist_balance_offset").as_bool();
+    waist_pitch_balance_gain_ =
+        this->get_parameter("waist_pitch_balance_gain").as_double();
+    waist_pitch_balance_limit_ =
+        this->get_parameter("waist_pitch_balance_limit").as_double();
+    waist_roll_from_pitch_asym_gain_ =
+        this->get_parameter("waist_roll_from_pitch_asym_gain").as_double();
+    waist_roll_from_pitch_asym_limit_ =
+        this->get_parameter("waist_roll_from_pitch_asym_limit").as_double();
+    waist_roll_from_roll_asym_gain_ =
+        this->get_parameter("waist_roll_from_roll_asym_gain").as_double();
+    waist_roll_from_roll_asym_limit_ =
+        this->get_parameter("waist_roll_from_roll_asym_limit").as_double();
 
     weight_active_ = this->get_parameter("weight_active").as_double();
     weight_acquire_rate_ = this->get_parameter("weight_acquire_rate").as_double();
@@ -570,7 +674,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
       q_target_safe_8_[i] = Lerp(track_entry_start_8_[i], target8[i], t);
     }
 
-    desired_17_ = BuildTarget17FromQ8(q_target_safe_8_);
+    const std::vector<double> q_balanced_8 = ApplyWaistBalanceOffset(q_target_safe_8_);
+    desired_17_ = BuildTarget17FromQ8(q_balanced_8);
     StepTowardsDesired(max_joint_delta_);
     weight_ = static_cast<float>(weight_active_);
 
@@ -592,7 +697,8 @@ class G1ArmSdkBridge : public rclcpp::Node {
       q_target_safe_8_[i] = ema_alpha_ * q_ref_8[i] + (1.0 - ema_alpha_) * q_target_safe_8_[i];
     }
 
-    desired_17_ = BuildTarget17FromQ8(q_target_safe_8_);
+    const std::vector<double> q_balanced_8 = ApplyWaistBalanceOffset(q_target_safe_8_);
+    desired_17_ = BuildTarget17FromQ8(q_balanced_8);
     StepTowardsDesired(max_joint_delta_);
     weight_ = static_cast<float>(weight_active_);
   }
@@ -782,6 +888,14 @@ class G1ArmSdkBridge : public rclcpp::Node {
   double kd_waist_{};
   double dq_{};
   double tau_ff_{};
+
+  bool enable_waist_balance_offset_{};
+  double waist_pitch_balance_gain_{};
+  double waist_pitch_balance_limit_{};
+  double waist_roll_from_pitch_asym_gain_{};
+  double waist_roll_from_pitch_asym_limit_{};
+  double waist_roll_from_roll_asym_gain_{};
+  double waist_roll_from_roll_asym_limit_{};
 
   double weight_active_{};
   double weight_acquire_rate_{};
