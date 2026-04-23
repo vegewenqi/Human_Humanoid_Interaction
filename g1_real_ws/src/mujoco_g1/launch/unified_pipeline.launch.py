@@ -469,6 +469,12 @@ def generate_launch_description():
                     "hr_margin_phi": 0.03,
                     "rr_gamma": 2.0,
                     "hr_gamma": 2.0,
+
+                    "enable_robot_caps_viz": False,
+                    "enable_distance_viz": False,
+                    "log_summary": True,
+                    "summary_period_sec": 1.0,
+
                     # "use_gpu": True,
                 }
             ],

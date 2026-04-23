@@ -10,6 +10,7 @@ Safe commands are published on /joint_commands at a fixed rate (1/dt Hz).
 """
 
 import os
+import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -89,6 +90,12 @@ class G1CBFNode(Node):
         self.declare_parameter('enable_human_collision', True)
         self.declare_parameter('enable_box_obstacles', False)
 
+        # New runtime / debug switches
+        self.declare_parameter('enable_robot_caps_viz', True)
+        self.declare_parameter('enable_distance_viz', True)
+        self.declare_parameter('log_summary', False)
+        self.declare_parameter('summary_period_sec', 1.0)
+
         # Set JAX config before importing cbf module
         use_gpu = self.get_parameter('use_gpu').value
         os.environ['JAX_PLATFORMS'] = 'cuda' if use_gpu else 'cpu'
@@ -103,11 +110,11 @@ class G1CBFNode(Node):
             raise
         from g1_cbf.cbf import DpaxCapsuleCBF, DpaxBoxCBF  # noqa: E402
 
-        dt = self.get_parameter('dt').value
-        rr_gamma = self.get_parameter('rr_gamma').value
-        hr_gamma = self.get_parameter('hr_gamma').value
-        rr_margin_phi = self.get_parameter('rr_margin_phi').value
-        hr_margin_phi = self.get_parameter('hr_margin_phi').value
+        dt = float(self.get_parameter('dt').value)
+        rr_gamma = float(self.get_parameter('rr_gamma').value)
+        hr_gamma = float(self.get_parameter('hr_gamma').value)
+        rr_margin_phi = float(self.get_parameter('rr_margin_phi').value)
+        hr_margin_phi = float(self.get_parameter('hr_margin_phi').value)
         urdf_path = self.get_parameter('urdf_path').value
         self.geom_type = self.get_parameter('collision_geometry').value
 
@@ -126,6 +133,14 @@ class G1CBFNode(Node):
         self.enable_box_obstacles = bool(
             self.get_parameter('enable_box_obstacles').value
         )
+        self.enable_robot_caps_viz = bool(self.get_parameter('enable_robot_caps_viz').value)
+        self.enable_distance_viz = bool(
+            self.get_parameter('enable_distance_viz').value
+        )
+        self.log_summary = bool(self.get_parameter('log_summary').value)
+        self.summary_period_sec = float(
+            self.get_parameter('summary_period_sec').value
+        )
 
         if not urdf_path:
             self.get_logger().fatal('urdf_path parameter is required')
@@ -133,7 +148,14 @@ class G1CBFNode(Node):
 
         self.get_logger().info(f'Loading URDF: {urdf_path}')
         self.get_logger().info(
-            f'CBF params: dt={dt}, rr_gamma={rr_gamma}, rr_margin_phi={rr_margin_phi}, hr_gamma={hr_gamma}, hr_margin_phi={hr_margin_phi}, self_geom={self.geom_type}'
+            f'CBF params: dt={dt}, rr_gamma={rr_gamma}, rr_margin_phi={rr_margin_phi}, '
+            f'hr_gamma={hr_gamma}, hr_margin_phi={hr_margin_phi}, self_geom={self.geom_type}'
+        )
+        self.get_logger().info(
+            f'viz: enable_robot_caps_viz={self.enable_robot_caps_viz}, '
+            f'enable_distance_viz={self.enable_distance_viz}, '
+            f'log_summary={self.log_summary}, '
+            f'summary_period_sec={self.summary_period_sec:.2f}'
         )
 
         # ---------------- Subsystems ----------------
@@ -142,7 +164,7 @@ class G1CBFNode(Node):
 
         # Self-collision CBF
         if self.geom_type == 'boxes':
-            beta = self.get_parameter('beta').value
+            beta = float(self.get_parameter('beta').value)
             self.self_cbf = DpaxBoxCBF(gamma=rr_gamma, beta=beta)
         else:
             self.self_cbf = DpaxCapsuleCBF(
@@ -155,7 +177,7 @@ class G1CBFNode(Node):
         )
 
         # Optional box obstacle CBF
-        beta = self.get_parameter('beta').value
+        beta = float(self.get_parameter('beta').value)
         self.box_cbf = DpaxBoxCBF(gamma=hr_gamma, beta=beta)
 
         self.get_logger().info('dpax CBFs ready')
@@ -170,12 +192,14 @@ class G1CBFNode(Node):
             n_cbf=max_self + max_human + max_box,
         )
 
-        # TODO:
-        # If sim and real CBF nodes run together, split collider/distance
-        # marker topics for sim vs real to avoid mixed visualization.
-        self.viz = ColliderVisualizer(
-            self, self.kin, geometry_type=self.geom_type,
-        )
+        self.viz = None
+        if self.enable_robot_caps_viz or self.enable_distance_viz:
+            # TODO:
+            # If sim and real CBF nodes run together, split collider/distance
+            # marker topics for sim vs real to avoid mixed visualization.
+            self.viz = ColliderVisualizer(
+                self, self.kin, geometry_type=self.geom_type,
+            )
 
         # ---------------- State ----------------
         self.q_full = None
@@ -202,6 +226,13 @@ class G1CBFNode(Node):
             37.0, 37.0, 37.0,         # right arm
         ])
         self.dq_min = -self.dq_max
+
+        # Summary counters
+        self._summary_last_time = time.perf_counter()
+        self._summary_tick_count = 0
+        self._summary_last_constraints = 0
+        self._summary_last_total_ms = 0.0
+        self._summary_last_qp_ms = 0.0
 
         # ---------------- Subscribers ----------------
         self.create_subscription(
@@ -247,7 +278,7 @@ class G1CBFNode(Node):
             f'enable_box_obstacles={self.enable_box_obstacles}'
         )
         self.get_logger().info(
-            f'g1_cbf_node ready — publishing at {1.0/dt:.0f} Hz'
+            f'g1_cbf_node ready — timer period={dt:.3f}s ({1.0/dt:.0f} Hz target)'
         )
 
     # ------------------------------------------------------------------
@@ -351,10 +382,12 @@ class G1CBFNode(Node):
         if self.q_full is None or self.q_des_latest is None:
             return
 
-        dt = self.get_parameter('dt').value
-        K = self.get_parameter('K').value
-        max_vel = self.get_parameter('max_velocity').value
-        lpf = self.get_parameter('lpf_gain').value
+        t0 = time.perf_counter()
+
+        dt = float(self.get_parameter('dt').value)
+        K = float(self.get_parameter('K').value)
+        max_vel = float(self.get_parameter('max_velocity').value)
+        lpf = float(self.get_parameter('lpf_gain').value)
 
         q_ctrl = self.kin.extract_controlled(self.q_full)
 
@@ -379,8 +412,16 @@ class G1CBFNode(Node):
         # FK
         self.kin.update(self.q_full)
 
+        stamp = self.get_clock().now().to_msg()
+
         # Robot collider visualization
-        self.viz.publish(self.get_clock().now().to_msg())
+        if self.enable_robot_caps_viz and self.viz is not None:
+            self.viz.publish(stamp)
+
+        # Build robot endpoint cache once for capsule mode
+        robot_endpoints = None
+        if self.geom_type != 'boxes':
+            robot_endpoints = self._build_robot_endpoint_cache()
 
         constraints = []
         closest_points = []
@@ -393,13 +434,13 @@ class G1CBFNode(Node):
                 )
             else:
                 self._build_capsule_constraints(
-                    constraints, closest_points,
+                    robot_endpoints, constraints, closest_points,
                 )
 
         # human collision
         if self.enable_human_collision and self.human_capsules:
             self._build_human_capsule_constraints(
-                constraints, closest_points,
+                robot_endpoints, constraints, closest_points,
             )
 
         # optional box obstacles
@@ -408,15 +449,16 @@ class G1CBFNode(Node):
                 constraints, closest_points,
             )
 
-        # Publish distance lines for all active constraints
-        self.viz.publish_distances(
-            self.get_clock().now().to_msg(), closest_points,
-        )
+        # Publish distance lines
+        if self.enable_distance_viz and self.viz is not None:
+            self.viz.publish_distances(stamp, closest_points)
 
+        t_qp0 = time.perf_counter()
         dq_safe = self.qp.solve(
             dq_ref, constraints,
             self.dq_min, self.dq_max,
         )
+        t_qp1 = time.perf_counter()
 
         self.q_cbf_target += dq_safe * dt
 
@@ -429,17 +471,24 @@ class G1CBFNode(Node):
         )
 
         safe_msg = JointState()
-        safe_msg.header.stamp = self.get_clock().now().to_msg()
+        safe_msg.header.stamp = stamp
         safe_msg.name = list(CONTROLLED_JOINTS)
         safe_msg.position = self.q_cbf_target.tolist()
         safe_msg.velocity = dq_safe.tolist()
         self.cmd_pub.publish(safe_msg)
 
+        t1 = time.perf_counter()
+        self._update_summary(
+            n_constraints=len(constraints),
+            total_ms=(t1 - t0) * 1000.0,
+            qp_ms=(t_qp1 - t_qp0) * 1000.0,
+        )
+
     # ------------------------------------------------------------------
     # Constraint builders
     # ------------------------------------------------------------------
 
-    def _build_capsule_constraints(self, constraints, closest_points):
+    def _build_robot_endpoint_cache(self):
         endpoints = {}
         for name in self.kin.collision_bodies:
             a, b, J_a, J_b = self.kin.get_endpoint_jacobians(name)
@@ -451,9 +500,11 @@ class G1CBFNode(Node):
                 'J_b': J_b,
                 'radius': body['radius'],
             }
+        return endpoints
 
+    def _build_capsule_constraints(self, robot_endpoints, constraints, closest_points):
         for nameA, nameB in COLLISION_PAIRS:
-            eA, eB = endpoints[nameA], endpoints[nameB]
+            eA, eB = robot_endpoints[nameA], robot_endpoints[nameB]
 
             phi, A_row, b_val, p1, p2 = self.self_cbf.build_constraint(
                 eA['radius'], eA['a'], eA['b'],
@@ -464,19 +515,9 @@ class G1CBFNode(Node):
             constraints.append((A_row, b_val))
             closest_points.append((p1, p2))
 
-    def _build_human_capsule_constraints(self, constraints, closest_points):
-        robot_endpoints = {}
-        for name in self.kin.collision_bodies:
-            a, b, J_a, J_b = self.kin.get_endpoint_jacobians(name)
-            body = self.kin.collision_bodies[name]
-            robot_endpoints[name] = {
-                'a': a,
-                'b': b,
-                'J_a': J_a,
-                'J_b': J_b,
-                'radius': body['radius'],
-            }
-
+    def _build_human_capsule_constraints(
+        self, robot_endpoints, constraints, closest_points
+    ):
         for robot_name, human_name in ROBOT_HUMAN_COLLISION_PAIRS:
             if robot_name not in robot_endpoints:
                 self.get_logger().warn(
@@ -537,6 +578,34 @@ class G1CBFNode(Node):
                 )
                 constraints.append((A_row, b_val))
                 closest_points.append((p1, p2))
+
+    # ------------------------------------------------------------------
+    # Logging / summary
+    # ------------------------------------------------------------------
+
+    def _update_summary(self, n_constraints, total_ms, qp_ms):
+        if not self.log_summary:
+            return
+
+        self._summary_tick_count += 1
+        self._summary_last_constraints = n_constraints
+        self._summary_last_total_ms = total_ms
+        self._summary_last_qp_ms = qp_ms
+
+        now = time.perf_counter()
+        elapsed = now - self._summary_last_time
+        if elapsed < self.summary_period_sec:
+            return
+
+        hz = self._summary_tick_count / max(elapsed, 1e-9)
+        self.get_logger().info(
+            f'[summary] tick_hz={hz:.2f}, '
+            f'constraints={self._summary_last_constraints}, '
+            f'total_ms={self._summary_last_total_ms:.2f}, '
+            f'qp_ms={self._summary_last_qp_ms:.2f}'
+        )
+        self._summary_last_time = now
+        self._summary_tick_count = 0
 
     # ------------------------------------------------------------------
     # Helpers
