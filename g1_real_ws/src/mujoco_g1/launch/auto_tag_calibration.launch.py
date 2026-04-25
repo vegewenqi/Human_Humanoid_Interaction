@@ -3,7 +3,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    urdf_path = '/ws/src/g1_cbf_ros2/g1_cbf/g1_29dof.urdf'
+    urdf_path = '/ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf'
 
     return LaunchDescription([
         Node(
@@ -18,21 +18,22 @@ def generate_launch_description():
 
                 "control_dt": 0.01,
                 "ema_alpha": 0.25,
-                "max_joint_velocity": 0.7,
+                "max_joint_velocity": 0.2,
                 "home_transition_velocity": 0.20,
                 "shutdown_return_velocity": 0.20,
-                "weight_acquire_rate": 0.30,
-                "weight_release_rate": 0.30,
+                "weight_acquire_rate": 0.50,
+                "weight_release_rate": 0.50,
 
                 "kp_arm": 50.0,
                 "kd_arm": 2.0,
-                "kp_waist": 100.0,
-                "kd_waist": 10.0,
+                "kp_waist": 70.0,
+                "kd_waist": 8.0,
                 "dq": 0.0,
                 "tau_ff": 0.0,
                 "weight_active": 1.0,
                 "shutdown_release_sec": 2.0,
 
+                'auto_move_to_home': False,
                 "enable_waist_balance_offset": False,
 
                 "q_home_8": [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0, 0.0, 1.5708],
@@ -63,10 +64,15 @@ def generate_launch_description():
                 'tag_offset_y': 0.0,
                 'tag_offset_z': 0.125,
 
-                'settle_sec': 2.5,
-                'sample_sec': 0.8,
                 'roll_amp': 0.08,
                 'pitch_amp': 0.08,
+                'start_delay_sec': 5.0,
+                'settle_sec': 5.0,
+                'sample_sec': 1.0,
+                'tag_timeout_sec': 0.30,
+                'max_zed_std_m': 0.015,
+                'max_robot_std_m': 0.005,
+                'max_retries_per_pose': 2,
             }],
         ),
     ])

@@ -20,7 +20,7 @@ class CalibrationKinematics:
         self.data = self.model.createData()
 
         if tag_offset_xyz is None:
-            tag_offset_xyz = np.array([0.08, 0.0, 0.125], dtype=np.float64)
+            tag_offset_xyz = np.array([0.11613403306399124, 0.008857834098559534, 0.13122103529705606], dtype=np.float64)
         if tag_offset_rot is None:
             tag_offset_rot = Rotation.identity()
 
