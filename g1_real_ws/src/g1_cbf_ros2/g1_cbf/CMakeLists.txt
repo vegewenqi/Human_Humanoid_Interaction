@@ -27,5 +27,10 @@ install(PROGRAMS
 install(DIRECTORY rviz
   DESTINATION share/${PROJECT_NAME}
 )
+install(PROGRAMS
+  scripts/calibration_sampler_node.py
+  RENAME calibration_sampler_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()
