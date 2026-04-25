@@ -224,10 +224,17 @@ int main(int argc, char **argv)
 
                 cv::drawFrameAxes(vis, camera_matrix, dist_coeffs, rvec, tvec, tag_size_m * 0.5);
 
-                cv::Point3f p_cam(
+                cv::Point3f p_cv(
                     static_cast<float>(tvec.at<double>(0,0)),
                     static_cast<float>(tvec.at<double>(1,0)),
                     static_cast<float>(tvec.at<double>(2,0))
+                );
+                // OpenCV camera frame: x right, y down, z forward
+                // ZED RIGHT_HANDED_Z_UP_X_FWD: x forward, y left, z up
+                cv::Point3f p_cam(
+                    p_cv.z,
+                    -p_cv.x,
+                    -p_cv.y
                 );
 
                 cv::Point3f p_world = cameraToWorld(cam_pose, p_cam);
