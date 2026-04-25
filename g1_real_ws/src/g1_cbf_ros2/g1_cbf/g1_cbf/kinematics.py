@@ -30,16 +30,16 @@ _COLLISION_BODIES = {
     },
     'left_upper_arm': {
         'frame': 'left_shoulder_roll_link',
-        'offset_xyz': np.array([0.0, 0.015, -0.08]),
+        'offset_xyz': np.array([0.0, 0.001, -0.092]),
         'offset_rot': Rotation.from_euler('z', np.pi / 4),
-        'half_length': 0.14,
+        'half_length': 0.152,
         'radius': 0.05,
     },
     'right_upper_arm': {
         'frame': 'right_shoulder_roll_link',
-        'offset_xyz': np.array([0.0, -0.015, -0.08]),
+        'offset_xyz': np.array([0.0, -0.001, -0.092]),
         'offset_rot': Rotation.from_euler('z', np.pi / 4),
-        'half_length': 0.14,
+        'half_length': 0.152,
         'radius': 0.05,
 },
     'left_arm': {
