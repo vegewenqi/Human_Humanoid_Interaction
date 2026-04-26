@@ -3,8 +3,8 @@
     <General>
       <Interfaces>
         <!-- <NetworkInterface name="enx98ded0145852" priority="default" multicast="default" /> -->
-        <!-- <NetworkInterface name="eth0" priority="default" multicast="default" /> -->
-        <NetworkInterface name="wlp0s20f3" priority="default" multicast="default" />
+        <NetworkInterface name="eth0" priority="default" multicast="default" />
+        <!-- <NetworkInterface name="wlp0s20f3" priority="default" multicast="default" /> -->
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>
