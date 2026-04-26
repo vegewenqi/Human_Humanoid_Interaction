@@ -63,6 +63,9 @@ class DpaxCapsuleCBF:
         R2, a2, b2, J_a2, J_b2,
         *,
         need_closest_points=False,
+        v_a2=None,
+        v_b2=None,
+        return_grads=False,
         **kwargs,
     ):
         """Build capsule CBF constraint.
@@ -89,7 +92,30 @@ class DpaxCapsuleCBF:
 
         h = phi - self.margin_phi
         A_row = dphi_dq
-        b_val = -self.gamma * h
+
+        # Dynamic obstacle compensation.
+        # Object 2 can be a moving obstacle. Its endpoint velocities are not
+        # decision variables, so they enter the CBF inequality as a known term:
+        #
+        #   hdot_robot + hdot_obstacle + gamma h >= 0
+        #   hdot_robot >= -gamma h - hdot_obstacle
+        #
+        hdot_obstacle = 0.0
+        if v_a2 is not None and v_b2 is not None:
+            v_a2_np = np.asarray(v_a2, dtype=np.float64)
+            v_b2_np = np.asarray(v_b2, dtype=np.float64)
+            if (
+                v_a2_np.shape == (3,)
+                and v_b2_np.shape == (3,)
+                and np.all(np.isfinite(v_a2_np))
+                and np.all(np.isfinite(v_b2_np))
+            ):
+                hdot_obstacle = (
+                    float(np.asarray(ga2) @ v_a2_np)
+                    + float(np.asarray(gb2) @ v_b2_np)
+                )
+
+        b_val = -self.gamma * h - hdot_obstacle
 
         # Closest points on centerlines
         p1 = None
@@ -99,6 +125,13 @@ class DpaxCapsuleCBF:
             z = active_set_qp(Q, q)
             p1 = np.asarray(b1_j + z[0] * (a1_j - b1_j))
             p2 = np.asarray(b2_j + z[1] * (a2_j - b2_j))
+
+        if return_grads:
+            return (
+                phi, A_row, b_val, p1, p2,
+                np.asarray(ga1), np.asarray(gb1),
+                np.asarray(ga2), np.asarray(gb2),
+            )
 
         return phi, A_row, b_val, p1, p2
 

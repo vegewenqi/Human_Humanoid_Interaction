@@ -55,10 +55,17 @@ ROBOT_HUMAN_COLLISION_PAIRS = [
     ('left_upper_arm', 'right_forearm_hand'),
     ('right_upper_arm', 'left_upper_arm'),
     ('right_upper_arm', 'left_forearm_hand'),
-    # ('torso', 'right_upper_arm'),
-    # ('torso', 'right_forearm_hand'),
-    # ('torso', 'left_upper_arm'),
-    # ('torso', 'left_forearm_hand'),
+    ('torso', 'right_upper_arm'),
+    ('torso', 'right_forearm_hand'),
+    ('torso', 'left_upper_arm'),
+    ('torso', 'left_forearm_hand'),
+    ('left_arm', 'torso'),
+    ('right_arm', 'torso'),
+    ('left_upper_arm', 'torso'),
+    ('right_upper_arm', 'torso'),
+    ('left_arm', 'right_thigh'),
+    ('right_arm', 'left_thigh'),
+
 ]
 
 
@@ -90,7 +97,13 @@ class G1CBFNode(Node):
         self.declare_parameter('enable_human_collision', True)
         self.declare_parameter('enable_box_obstacles', False)
         self.declare_parameter('enable_coarse_gating', True)
-        self.declare_parameter('coarse_distance_activate', 0.60)  
+        self.declare_parameter('coarse_distance_activate', 0.60)
+
+        self.declare_parameter('enable_dynamic_human_cbf', True)
+        self.declare_parameter('human_velocity_lpf_alpha', 0.35)
+        self.declare_parameter('human_velocity_max', 2.0)
+        self.declare_parameter('human_velocity_dt_min', 0.01)
+        self.declare_parameter('human_velocity_dt_max', 0.20)  
 
         # Runtime / debug switches
         self.declare_parameter('enable_robot_caps_viz', True)
@@ -141,6 +154,21 @@ class G1CBFNode(Node):
         self.coarse_distance_activate = float(
             self.get_parameter('coarse_distance_activate').value
         )
+        self.enable_dynamic_human_cbf = bool(
+            self.get_parameter('enable_dynamic_human_cbf').value
+        )
+        self.human_velocity_lpf_alpha = float(
+            self.get_parameter('human_velocity_lpf_alpha').value
+        )
+        self.human_velocity_max = float(
+            self.get_parameter('human_velocity_max').value
+        )
+        self.human_velocity_dt_min = float(
+            self.get_parameter('human_velocity_dt_min').value
+        )
+        self.human_velocity_dt_max = float(
+            self.get_parameter('human_velocity_dt_max').value
+        )
         self.enable_robot_caps_viz = bool(self.get_parameter('enable_robot_caps_viz').value)
         self.enable_distance_viz = bool(
             self.get_parameter('enable_distance_viz').value
@@ -165,6 +193,9 @@ class G1CBFNode(Node):
             f'enable_box_obstacles={self.enable_box_obstacles}, '
             f'coarse_gating: enable={self.enable_coarse_gating}, '
             f'd_activate={self.coarse_distance_activate:.3f} m, '
+            f'dynamic_human_cbf={self.enable_dynamic_human_cbf}, '
+            f'human_vel_lpf={self.human_velocity_lpf_alpha:.2f}, '
+            f'human_vel_max={self.human_velocity_max:.2f} m/s, '
             f'viz: enable_robot_caps_viz={self.enable_robot_caps_viz}, '
             f'enable_distance_viz={self.enable_distance_viz}, '
             f'log_summary={self.log_summary}, '
@@ -221,8 +252,13 @@ class G1CBFNode(Node):
         self.q_cbf_target = None
 
         # human capsules in robot frame
-        # dict[name] = {'a':(3,), 'b':(3,), 'radius':float}
+        # dict[name] = {
+        #   'a':(3,), 'b':(3,), 'radius':float,
+        #   'v_a':(3,), 'v_b':(3,),
+        # }
         self.human_capsules = {}
+        self._prev_human_capsules_raw = {}
+        self._prev_human_capsules_time = None
 
         # box obstacles
         self._obstacles = []  # list of {center, rot, half_extents}
@@ -318,20 +354,80 @@ class G1CBFNode(Node):
             )
             return
 
-        caps = {}
+        now = time.perf_counter()
+
+        raw_caps = {}
         for i, name in enumerate(HUMAN_CAPSULE_NAMES):
             s = 7 * i
             block = data[s:s + 7]
             if not np.all(np.isfinite(block[:6])) or not np.isfinite(block[6]):
                 continue
 
-            caps[name] = {
+            raw_caps[name] = {
                 'a': block[0:3].copy(),
                 'b': block[3:6].copy(),
                 'radius': float(block[6]),
             }
 
+        # Estimate dt from callback arrival time.
+        dt_h = None
+        if self._prev_human_capsules_time is not None:
+            dt_h = now - self._prev_human_capsules_time
+
+        alpha = float(np.clip(self.human_velocity_lpf_alpha, 0.0, 1.0))
+        v_max = max(float(self.human_velocity_max), 0.0)
+
+        use_velocity = (
+            self.enable_dynamic_human_cbf
+            and dt_h is not None
+            and self.human_velocity_dt_min <= dt_h <= self.human_velocity_dt_max
+        )
+
+        caps = {}
+        for name, cur in raw_caps.items():
+            a = cur['a']
+            b = cur['b']
+            r = cur['radius']
+
+            v_a = np.zeros(3, dtype=np.float64)
+            v_b = np.zeros(3, dtype=np.float64)
+
+            if use_velocity and name in self._prev_human_capsules_raw:
+                prev = self._prev_human_capsules_raw[name]
+                a_prev = prev['a']
+                b_prev = prev['b']
+
+                v_a_raw = (a - a_prev) / dt_h
+                v_b_raw = (b - b_prev) / dt_h
+
+                v_a_raw = self._clip_vec_norm(v_a_raw, v_max)
+                v_b_raw = self._clip_vec_norm(v_b_raw, v_max)
+
+                # Low-pass filter velocity using previous filtered velocity if available.
+                prev_filt = self.human_capsules.get(name, None)
+                if prev_filt is not None:
+                    v_a_prev = prev_filt.get('v_a', np.zeros(3, dtype=np.float64))
+                    v_b_prev = prev_filt.get('v_b', np.zeros(3, dtype=np.float64))
+                    v_a = (1.0 - alpha) * v_a_prev + alpha * v_a_raw
+                    v_b = (1.0 - alpha) * v_b_prev + alpha * v_b_raw
+                else:
+                    v_a = v_a_raw
+                    v_b = v_b_raw
+
+                v_a = self._clip_vec_norm(v_a, v_max)
+                v_b = self._clip_vec_norm(v_b, v_max)
+
+            caps[name] = {
+                'a': a,
+                'b': b,
+                'radius': r,
+                'v_a': v_a,
+                'v_b': v_b,
+            }
+
         self.human_capsules = caps
+        self._prev_human_capsules_raw = raw_caps
+        self._prev_human_capsules_time = now
 
     def _bbox_cb(self, msg: Detection3DArray):
         obstacles = []
@@ -555,11 +651,18 @@ class G1CBFNode(Node):
             ):
                 continue
 
-            # human capsule treated as static wrt robot command
+            # Human is not a QP decision variable, so its Jacobian wrt robot dq is zero.
+            # Its measured endpoint velocity enters the CBF RHS through hdot_obstacle.
             if zero_J_template is None:
                 zero_J_template = np.zeros_like(eR['J_a'])
             J_zero_a = zero_J_template
             J_zero_b = zero_J_template
+
+            vHa = eH.get('v_a', np.zeros(3, dtype=np.float64))
+            vHb = eH.get('v_b', np.zeros(3, dtype=np.float64))
+            if not self.enable_dynamic_human_cbf:
+                vHa = np.zeros(3, dtype=np.float64)
+                vHb = np.zeros(3, dtype=np.float64)
 
             phi, A_row, b_val, p1, p2 = self.human_cbf.build_constraint(
                 eR['radius'], eR['a'], eR['b'],
@@ -567,6 +670,8 @@ class G1CBFNode(Node):
                 eH['radius'], eH['a'], eH['b'],
                 J_zero_a, J_zero_b,
                 need_closest_points=self.enable_distance_viz,
+                v_a2=vHa,
+                v_b2=vHb,
             )
             constraints.append((A_row, b_val))
             if p1 is not None and p2 is not None:
@@ -660,7 +765,19 @@ class G1CBFNode(Node):
         c1 = self._capsule_center(a1, b1)
         c2 = self._capsule_center(a2, b2)
         d_center = np.linalg.norm(c1 - c2)
-        return d_center < self.coarse_distance_activate
+        return d_center < self.coarse_distance_activate\
+    
+    @staticmethod
+    def _clip_vec_norm(v, max_norm):
+        v = np.asarray(v, dtype=np.float64)
+        if max_norm <= 0.0:
+            return np.zeros_like(v)
+        n = np.linalg.norm(v)
+        if not np.isfinite(n) or n < 1e-12:
+            return np.zeros_like(v)
+        if n > max_norm:
+            return v * (max_norm / n)
+        return v
 
 
 def main(args=None):
