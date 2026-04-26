@@ -33,14 +33,14 @@ _COLLISION_BODIES = {
         'offset_xyz': np.array([0.0, 0.001, -0.092]),
         'offset_rot': Rotation.from_euler('z', np.pi / 4),
         'half_length': 0.152,
-        'radius': 0.05,
+        'radius': 0.065,
     },
     'right_upper_arm': {
         'frame': 'right_shoulder_roll_link',
         'offset_xyz': np.array([0.0, -0.001, -0.092]),
         'offset_rot': Rotation.from_euler('z', np.pi / 4),
         'half_length': 0.152,
-        'radius': 0.05,
+        'radius': 0.065,
 },
     'left_arm': {
         'frame': 'left_elbow_link',
@@ -48,14 +48,14 @@ _COLLISION_BODIES = {
         # Align Z along arm (pitch 90), then spin cross-section 45 deg
         'offset_rot': Rotation.from_euler('y', np.pi / 2) * Rotation.from_euler('z', np.pi / 4),
         'half_length': 0.20,
-        'radius': 0.05,
+        'radius': 0.065,
     },
     'right_arm': {
         'frame': 'right_elbow_link',
         'offset_xyz': np.array([0.15, -0.001, -0.005]),
         'offset_rot': Rotation.from_euler('y', np.pi / 2) * Rotation.from_euler('z', np.pi / 4),
         'half_length': 0.20,
-        'radius': 0.05,
+        'radius': 0.065,
     },
     'left_thigh': {
         'frame': 'left_hip_yaw_link',

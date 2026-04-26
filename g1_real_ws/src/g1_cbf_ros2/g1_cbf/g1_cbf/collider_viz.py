@@ -63,14 +63,14 @@ class ColliderVisualizer:
             msg.markers.append(m)
             mid += 1
 
-            for sign in (+1, -1):
-                sph_c = center + sign * seg_half * axis
-                m = self._make_marker(
-                    stamp, mid, Marker.SPHERE,
-                    sph_c, quat, diam, diam, diam, color,
-                )
-                msg.markers.append(m)
-                mid += 1
+            # for sign in (+1, -1):
+            #     sph_c = center + sign * seg_half * axis
+            #     m = self._make_marker(
+            #         stamp, mid, Marker.SPHERE,
+            #         sph_c, quat, diam, diam, diam, color,
+            #     )
+            #     msg.markers.append(m)
+            #     mid += 1
 
         self.pub.publish(msg)
 
