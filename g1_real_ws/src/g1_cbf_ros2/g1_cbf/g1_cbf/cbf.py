@@ -42,9 +42,11 @@ def _box_b_from_half_extents(half_extents):
 class DpaxCapsuleCBF:
     """CBF for capsule-capsule pairs using dpax."""
 
-    def __init__(self, gamma: float = 5.0, margin_phi: float = 0.001):
+    def __init__(self, gamma: float = 5.0, margin_phi: float = 0.001,
+                safety_distance: float = None):
         self.gamma = gamma
         self.margin_phi = margin_phi
+        self.safety_distance = safety_distance
 
         self._grad_fn = jax.jit(
             grad(proximity, argnums=(1, 2, 4, 5))
@@ -90,7 +92,14 @@ class DpaxCapsuleCBF:
             + np.asarray(ga2) @ J_a2 + np.asarray(gb2) @ J_b2
         )
 
-        h = phi - self.margin_phi
+        if self.safety_distance is not None:
+            r_sum = float(R1) + float(R2)
+            margin_phi_eff = (r_sum + self.safety_distance) ** 2 - r_sum ** 2
+        else:
+            margin_phi_eff = self.margin_phi
+
+        h = phi - margin_phi_eff
+        
         A_row = dphi_dq
 
         # Dynamic obstacle compensation.

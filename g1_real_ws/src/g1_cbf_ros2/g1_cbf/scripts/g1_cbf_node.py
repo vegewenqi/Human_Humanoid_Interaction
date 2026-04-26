@@ -77,6 +77,8 @@ class G1CBFNode(Node):
         self.declare_parameter('dt', 0.02)
         self.declare_parameter('rr_margin_phi', 0.0063)
         self.declare_parameter('hr_margin_phi', 0.028)
+        self.declare_parameter('rr_safety_distance', 0.02)
+        self.declare_parameter('hr_safety_distance', 0.08)
         self.declare_parameter('beta', 1.05)
         self.declare_parameter('rr_gamma', 2.0)
         self.declare_parameter('hr_gamma', 2.0)
@@ -130,6 +132,8 @@ class G1CBFNode(Node):
         hr_gamma = float(self.get_parameter('hr_gamma').value)
         rr_margin_phi = float(self.get_parameter('rr_margin_phi').value)
         hr_margin_phi = float(self.get_parameter('hr_margin_phi').value)
+        rr_safety_distance = float(self.get_parameter('rr_safety_distance').value)  
+        hr_safety_distance = float(self.get_parameter('hr_safety_distance').value)
         urdf_path = self.get_parameter('urdf_path').value
         self.geom_type = self.get_parameter('collision_geometry').value
 
@@ -212,12 +216,12 @@ class G1CBFNode(Node):
             self.self_cbf = DpaxBoxCBF(gamma=rr_gamma, beta=beta)
         else:
             self.self_cbf = DpaxCapsuleCBF(
-                gamma=rr_gamma, margin_phi=rr_margin_phi,
+                gamma=rr_gamma, margin_phi=rr_margin_phi, safety_distance=rr_safety_distance
             )
 
         # Human-collision CBF always uses capsules
         self.human_cbf = DpaxCapsuleCBF(
-            gamma=hr_gamma, margin_phi=hr_margin_phi,
+            gamma=hr_gamma, margin_phi=hr_margin_phi, safety_distance=hr_safety_distance
         )
 
         # Optional box obstacle CBF
