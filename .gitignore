@@ -44,3 +44,6 @@ Makefile
 
 # cbf extra
 g1_real_ws/src/g1_cbf_ros2/g1_bridge/
+
+# calibration files
+g1_real_ws/calibration/

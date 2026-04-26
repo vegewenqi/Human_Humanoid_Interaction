@@ -55,10 +55,10 @@ ROBOT_HUMAN_COLLISION_PAIRS = [
     ('left_upper_arm', 'right_forearm_hand'),
     ('right_upper_arm', 'left_upper_arm'),
     ('right_upper_arm', 'left_forearm_hand'),
-    ('torso', 'right_upper_arm'),
-    ('torso', 'right_forearm_hand'),
-    ('torso', 'left_upper_arm'),
-    ('torso', 'left_forearm_hand'),
+    # ('torso', 'right_upper_arm'),
+    # ('torso', 'right_forearm_hand'),
+    # ('torso', 'left_upper_arm'),
+    # ('torso', 'left_forearm_hand'),
     ('left_arm', 'torso'),
     ('right_arm', 'torso'),
     ('left_upper_arm', 'torso'),
@@ -274,7 +274,7 @@ class G1CBFNode(Node):
 
         # Velocity limits (rad/s)
         self.dq_max = np.array([
-            30.0, 30.0,               # waist roll/pitch
+            2.0, 2.0,               # waist roll/pitch
             37.0, 37.0, 37.0,         # left arm
             37.0, 37.0, 37.0,         # right arm
         ])
