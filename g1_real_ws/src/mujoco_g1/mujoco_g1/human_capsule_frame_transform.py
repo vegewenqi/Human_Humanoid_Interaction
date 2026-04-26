@@ -137,6 +137,12 @@ class HumanCapsuleFrameTransform(Node):
         self.declare_parameter("extrinsic_qz", 0.0)
         self.declare_parameter("extrinsic_qw", 1.0)
 
+        # foot marker params
+        self.declare_parameter("enable_footprint_marker", True)
+        self.declare_parameter("ground_z", 0.0)
+        self.declare_parameter("footprint_size", 0.18)
+        self.declare_parameter("footprint_line_width", 0.012)
+
         # quick calibration params
         self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
         self.declare_parameter("bootstrap_num_frames", 50)
@@ -182,7 +188,16 @@ class HumanCapsuleFrameTransform(Node):
         self.pelvis_topic = str(self.get_parameter("pelvis_topic").value)
         self.bootstrap_num_frames = int(self.get_parameter("bootstrap_num_frames").value)
         self.startup_delay_sec = float(self.get_parameter("startup_delay_sec").value)
-
+        
+        self.enable_footprint_marker = bool(
+            self.get_parameter("enable_footprint_marker").value
+        )
+        self.ground_z = float(self.get_parameter("ground_z").value)
+        self.footprint_size = float(self.get_parameter("footprint_size").value)
+        self.footprint_line_width = float(
+            self.get_parameter("footprint_line_width").value
+        )
+        
         if self.bootstrap_num_frames <= 0:
             self.get_logger().warn(
                 f"bootstrap_num_frames={self.bootstrap_num_frames} invalid, reset to 50"
@@ -483,7 +498,103 @@ class HumanCapsuleFrameTransform(Node):
 
             ma.markers.append(m)
 
+        if self.enable_footprint_marker:
+            self._append_human_footprint_markers(ma, flat_caps)
+
         self.pub_markers.publish(ma)
+
+    def _append_human_footprint_markers(self, ma: MarkerArray, flat_caps: np.ndarray):
+        """
+        Add a ground crosshair and vertical line for the human location.
+
+        Uses capsule 0 = torso, whose endpoints are pelvis and neck in
+        HumanSkeletonCapsuleNode.CAPSULE_ORDER.
+        """
+        if flat_caps.size < 7:
+            return
+
+        torso = flat_caps[0:7]
+        if not np.all(np.isfinite(torso[:6])):
+            return
+
+        # In human_skeleton_capsule.py, torso = (pelvis, neck, radius).
+        # After transform, torso[0:3] is the human pelvis-like lower torso point.
+        p = torso[0:3].copy()
+        ground = np.array([p[0], p[1], self.ground_z], dtype=np.float64)
+
+        stamp = self.get_clock().now().to_msg()
+        base_id = 1000
+        half = 0.5 * self.footprint_size
+
+        # Vertical line: human pelvis/torso lower point down to ground
+        m_line = Marker()
+        m_line.header.stamp = stamp
+        m_line.header.frame_id = self.target_frame
+        m_line.ns = "human_footprint"
+        m_line.id = base_id
+        m_line.type = Marker.LINE_LIST
+        m_line.action = Marker.ADD
+        m_line.scale.x = float(self.footprint_line_width)
+        m_line.color.r = 1.0
+        m_line.color.g = 1.0
+        m_line.color.b = 1.0
+        m_line.color.a = 0.9
+        m_line.points.append(self._point_msg(p))
+        m_line.points.append(self._point_msg(ground))
+        ma.markers.append(m_line)
+
+        # Crosshair on ground
+        m_cross = Marker()
+        m_cross.header.stamp = stamp
+        m_cross.header.frame_id = self.target_frame
+        m_cross.ns = "human_footprint"
+        m_cross.id = base_id + 1
+        m_cross.type = Marker.LINE_LIST
+        m_cross.action = Marker.ADD
+        m_cross.scale.x = float(self.footprint_line_width)
+        m_cross.color.r = 1.0
+        m_cross.color.g = 1.0
+        m_cross.color.b = 0.0
+        m_cross.color.a = 1.0
+
+        p1 = ground + np.array([ half, 0.0, 0.0])
+        p2 = ground + np.array([-half, 0.0, 0.0])
+        p3 = ground + np.array([0.0,  half, 0.0])
+        p4 = ground + np.array([0.0, -half, 0.0])
+        m_cross.points.append(self._point_msg(p1))
+        m_cross.points.append(self._point_msg(p2))
+        m_cross.points.append(self._point_msg(p3))
+        m_cross.points.append(self._point_msg(p4))
+        ma.markers.append(m_cross)
+
+        # Small flat disk at ground point
+        m_disk = Marker()
+        m_disk.header.stamp = stamp
+        m_disk.header.frame_id = self.target_frame
+        m_disk.ns = "human_footprint"
+        m_disk.id = base_id + 2
+        m_disk.type = Marker.CYLINDER
+        m_disk.action = Marker.ADD
+        m_disk.pose.position.x = float(ground[0])
+        m_disk.pose.position.y = float(ground[1])
+        m_disk.pose.position.z = float(ground[2] + 0.003)
+        m_disk.pose.orientation.x = 0.0
+        m_disk.pose.orientation.y = 0.0
+        m_disk.pose.orientation.z = 0.0
+        m_disk.pose.orientation.w = 1.0
+        m_disk.scale.x = float(self.footprint_size)
+        m_disk.scale.y = float(self.footprint_size)
+        m_disk.scale.z = 0.006
+        m_disk.color.r = 1.0
+        m_disk.color.g = 1.0
+        m_disk.color.b = 0.0
+        m_disk.color.a = 0.35
+        ma.markers.append(m_disk)
+
+    @staticmethod
+    def _point_msg(p: np.ndarray):
+        from geometry_msgs.msg import Point
+        return Point(x=float(p[0]), y=float(p[1]), z=float(p[2]))
 
 
 def main(args=None):
