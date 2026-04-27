@@ -618,7 +618,7 @@ class G1CBFNode(Node):
     def _build_capsule_constraints(self, robot_endpoints, constraints, closest_points):
         for nameA, nameB in COLLISION_PAIRS:
             eA, eB = robot_endpoints[nameA], robot_endpoints[nameB]
-            if not self._pair_is_active_by_center_distance(
+            if not self._pair_is_active_by_segment_distance(
                 eA['a'], eA['b'], eB['a'], eB['b']
             ):
                 continue
@@ -650,7 +650,7 @@ class G1CBFNode(Node):
             eR = robot_endpoints[robot_name]
             eH = self.human_capsules[human_name]
 
-            if not self._pair_is_active_by_center_distance(
+            if not self._pair_is_active_by_segment_distance(
                 eR['a'], eR['b'], eH['a'], eH['b']
             ):
                 continue
@@ -760,16 +760,96 @@ class G1CBFNode(Node):
             q[i] = name_to_pos[jname]
         return q
     
-    def _capsule_center(self, a, b):
-        return 0.5 * (a + b)
-
-    def _pair_is_active_by_center_distance(self, a1, b1, a2, b2):
+    def _pair_is_active_by_segment_distance(self, a1, b1, a2, b2):
         if not self.enable_coarse_gating:
             return True
-        c1 = self._capsule_center(a1, b1)
-        c2 = self._capsule_center(a2, b2)
-        d_center = np.linalg.norm(c1 - c2)
-        return d_center < self.coarse_distance_activate\
+
+        d_seg = self._segment_segment_distance(a1, b1, a2, b2)
+        return d_seg < self.coarse_distance_activate
+    
+    @staticmethod
+    def _segment_segment_distance(p1, q1, p2, q2):
+        """
+        Euclidean distance between two 3D line segments p1-q1 and p2-q2.
+        Pure NumPy, cheap enough for coarse gating.
+        """
+        p1 = np.asarray(p1, dtype=np.float64)
+        q1 = np.asarray(q1, dtype=np.float64)
+        p2 = np.asarray(p2, dtype=np.float64)
+        q2 = np.asarray(q2, dtype=np.float64)
+
+        u = q1 - p1
+        v = q2 - p2
+        w = p1 - p2
+
+        a = float(np.dot(u, u))
+        b = float(np.dot(u, v))
+        c = float(np.dot(v, v))
+        d = float(np.dot(u, w))
+        e = float(np.dot(v, w))
+
+        eps = 1e-12
+        D = a * c - b * b
+
+        sN, sD = D, D
+        tN, tD = D, D
+
+        if a < eps and c < eps:
+            return float(np.linalg.norm(p1 - p2))
+
+        if a < eps:
+            sN = 0.0
+            sD = 1.0
+            tN = e
+            tD = c
+        elif c < eps:
+            tN = 0.0
+            tD = 1.0
+            sN = -d
+            sD = a
+        else:
+            if D < eps:
+                sN = 0.0
+                sD = 1.0
+                tN = e
+                tD = c
+            else:
+                sN = b * e - c * d
+                tN = a * e - b * d
+
+                if sN < 0.0:
+                    sN = 0.0
+                    tN = e
+                    tD = c
+                elif sN > sD:
+                    sN = sD
+                    tN = e + b
+                    tD = c
+
+        if tN < 0.0:
+            tN = 0.0
+            if -d < 0.0:
+                sN = 0.0
+            elif -d > a:
+                sN = sD
+            else:
+                sN = -d
+                sD = a
+        elif tN > tD:
+            tN = tD
+            if (-d + b) < 0.0:
+                sN = 0.0
+            elif (-d + b) > a:
+                sN = sD
+            else:
+                sN = -d + b
+                sD = a
+
+        sc = 0.0 if abs(sN) < eps else sN / sD
+        tc = 0.0 if abs(tN) < eps else tN / tD
+
+        dP = w + sc * u - tc * v
+        return float(np.linalg.norm(dP))
     
     @staticmethod
     def _clip_vec_norm(v, max_norm):

@@ -502,7 +502,7 @@ def generate_launch_description():
                     "log_summary": True,
                     "summary_period_sec": 1.0,
                     "enable_coarse_gating": True,
-                    "coarse_distance_activate": 0.90,
+                    "coarse_distance_activate": 0.55,
 
                     "enable_dynamic_human_cbf": True,
                     "human_velocity_lpf_alpha": 0.5,
