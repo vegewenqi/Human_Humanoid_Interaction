@@ -92,6 +92,37 @@ ament_target_dependencies(zed_skeleton_pub_node
 install(TARGETS zed_skeleton_pub_node DESTINATION lib/${PROJECT_NAME})
 
 # -----------------------------
+# Fusion skeleton node: dual ZED X + ZED Fusion API
+add_executable(fusion_zed_skeleton_pub_node
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/fusion_main.cpp
+  ${ZED_COMMON_SRC}
+  ${ZED_HDR_FILES}
+)
+
+target_include_directories(fusion_zed_skeleton_pub_node PRIVATE
+  ${OpenCV_INCLUDE_DIRS}
+  ${ZED_INCLUDE_DIRS}
+  ${GLEW_INCLUDE_DIRS}
+  ${GLUT_INCLUDE_DIR}
+  ${CUDA_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include
+)
+
+target_link_libraries(fusion_zed_skeleton_pub_node
+  ${ZED_LIBS}
+  ${OPENGL_LIBRARIES}
+  ${GLUT_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  ${GLEW_LIBRARIES}
+)
+
+ament_target_dependencies(fusion_zed_skeleton_pub_node
+  rclcpp sensor_msgs std_msgs
+)
+
+install(TARGETS fusion_zed_skeleton_pub_node DESTINATION lib/${PROJECT_NAME})
+
+# -----------------------------
 # Calibration node
 add_executable(zed_calibration_node
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/calibration_main.cpp
