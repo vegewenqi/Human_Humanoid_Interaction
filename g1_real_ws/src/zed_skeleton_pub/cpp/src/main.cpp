@@ -30,9 +30,9 @@ int main(int argc, char **argv)
 {
     Camera zed;
     InitParameters init_parameters;
-    init_parameters.camera_resolution = RESOLUTION::HD1080;
-    init_parameters.camera_fps = 60;
-    init_parameters.depth_mode = DEPTH_MODE::NEURAL;
+    init_parameters.camera_resolution = RESOLUTION::SVGA;
+    init_parameters.camera_fps = 30;
+    init_parameters.depth_mode = DEPTH_MODE::NEURAL_LIGHT;
     init_parameters.coordinate_system = COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FWD;
 
     parseArgs(argc, argv, init_parameters);
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
     body_tracker_params.enable_body_fitting = false;
     body_tracker_params.body_format = sl::BODY_FORMAT::BODY_38;
     body_tracker_params.enable_segmentation = false;
-    body_tracker_params.detection_model = BODY_TRACKING_MODEL::HUMAN_BODY_FAST;
+    body_tracker_params.detection_model = BODY_TRACKING_MODEL::HUMAN_BODY_MEDIUM;
     body_tracker_params.allow_reduced_precision_inference = true;
 
     returned_state = zed.enableBodyTracking(body_tracker_params);
