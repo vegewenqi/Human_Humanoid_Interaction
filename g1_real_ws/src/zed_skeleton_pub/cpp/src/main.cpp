@@ -25,6 +25,8 @@ static inline int selectBestBodyIndex(const sl::Bodies &bodies);
 static inline double now_sec();
 
 bool record_video = false;
+bool show_2d_viewer = true;
+bool show_3d_viewer = false;
 
 int main(int argc, char **argv)
 {
@@ -96,7 +98,10 @@ int main(int argc, char **argv)
         display_resolution.height / (float)camera_config.resolution.height);
 
     GLViewer viewer;
-    viewer.init(argc, argv);
+    if (show_3d_viewer)
+    {
+        viewer.init(argc, argv);
+    }
 
     Pose cam_pose;
     cam_pose.pose_data.setIdentity();
@@ -193,11 +198,20 @@ int main(int argc, char **argv)
             // render dispaly at lower frame rate
             if (frame_id % 5 == 0)
             {
-                zed.retrieveImage(image_left, VIEW::LEFT, MEM::CPU, display_resolution);
-                zed.getPosition(cam_pose, REFERENCE_FRAME::WORLD);
-                viewer.updateData(single_body, cam_pose.pose_data);
+                if (show_2d_viewer)
+                {
+                    zed.retrieveImage(image_left, VIEW::LEFT, MEM::CPU, display_resolution);
+                }
+                if (show_3d_viewer)
+                {
+                    zed.getPosition(cam_pose, REFERENCE_FRAME::WORLD);
+                    viewer.updateData(single_body, cam_pose.pose_data);
+                }
 
-                render_2D(image_left_ocv, img_scale, single_body.body_list, single_body.is_tracked);
+                if (show_2d_viewer)
+                {
+                    render_2D(image_left_ocv, img_scale, single_body.body_list, single_body.is_tracked);
+                }
                 // we track only one person for now
                 // if (bodies.body_list.size() >= 2)
                 // {
@@ -244,16 +258,19 @@ int main(int argc, char **argv)
                     fps = 1.f / dt;
                 }
 
-                cv::putText(
-                    image_left_ocv,
-                    std::to_string((int)fps) + " FPS",
-                    cv::Point(10, 70),
-                    cv::FONT_HERSHEY_COMPLEX,
-                    1.0,
-                    cv::Scalar(0, 0, 255),
-                    2);
+                if (show_2d_viewer)
+                {
+                    cv::putText(
+                        image_left_ocv,
+                        std::to_string((int)fps) + " FPS",
+                        cv::Point(10, 70),
+                        cv::FONT_HERSHEY_COMPLEX,
+                        1.0,
+                        cv::Scalar(0, 0, 255),
+                        2);
+                }
 
-                if (record_video == true)
+                if (show_2d_viewer && record_video == true)
                 {
                     cv::Mat frame_bgr;
                     cv::cvtColor(image_left_ocv, frame_bgr, cv::COLOR_BGRA2BGR);
@@ -270,19 +287,22 @@ int main(int argc, char **argv)
                     }
                 }
 
-                cv::imshow(window_name, image_left_ocv);
-
-                key = cv::waitKey(1);
-
-                if (key == 'q')
+                if (show_2d_viewer)
                 {
-                    quit = true;
+                    cv::imshow(window_name, image_left_ocv);
+
+                    key = cv::waitKey(1);
+
+                    if (key == 'q')
+                    {
+                        quit = true;
+                    }
+                    if (key == 'p')
+                    {
+                        key_wait = (key_wait > 0) ? 0 : 10;
+                    }
                 }
-                if (key == 'p')
-                {
-                    key_wait = (key_wait > 0) ? 0 : 10;
-                }
-                if (!viewer.isAvailable())
+                if (show_3d_viewer && !viewer.isAvailable())
                 {
                     quit = true;
                 }
@@ -326,7 +346,10 @@ int main(int argc, char **argv)
         video_out.release();
     }
 
-    viewer.exit();
+    if (show_3d_viewer)
+    {
+        viewer.exit();
+    }
     image_left.free();
     bodies.body_list.clear();
     zed.disableBodyTracking();
@@ -380,63 +403,82 @@ static inline double now_sec()
 
 void parseArgs(int argc, char **argv, InitParameters &param)
 {
-    if (argc > 1 && string(argv[1]).find(".svo") != string::npos)
+    for (int i = 1; i < argc; ++i)
     {
-        param.input.setFromSVOFile(argv[1]);
-        cout << "[Sample] Using SVO File input: " << argv[1] << endl;
-    }
-    else if (argc > 1 && string(argv[1]).find(".svo") == string::npos)
-    {
-        string arg = string(argv[1]);
-        unsigned int a, b, c, d, port;
-        if (sscanf(arg.c_str(), "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port) == 5)
+        string arg = string(argv[i]);
+
+        if (arg == "--hide-all-viewer")
         {
-            // Stream input mode - IP + port
-            string ip_adress = to_string(a) + "." + to_string(b) + "." + to_string(c) + "." + to_string(d);
-            param.input.setFromStream(String(ip_adress.c_str()), port);
-            cout << "[Sample] Using Stream input, IP : " << ip_adress << ", port : " << port << endl;
+            show_2d_viewer = false;
+            show_3d_viewer = false;
+            cout << "[Sample] Hide all viewers" << endl;
+            continue;
         }
-        else if (sscanf(arg.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) == 4)
+        else if (arg == "--show-3d")
         {
-            // Stream input mode - IP only
-            param.input.setFromStream(String(argv[1]));
-            cout << "[Sample] Using Stream input, IP : " << argv[1] << endl;
-        }
-        else if (arg.find("HD2K") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::HD2K;
-            cout << "[Sample] Using Camera in resolution HD2K" << endl;
-        }
-        else if (arg.find("HD1200") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::HD1200;
-            cout << "[Sample] Using Camera in resolution HD1200" << endl;
-        }
-        else if (arg.find("HD1080") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::HD1080;
-            cout << "[Sample] Using Camera in resolution HD1080" << endl;
-        }
-        else if (arg.find("HD720") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::HD720;
-            cout << "[Sample] Using Camera in resolution HD720" << endl;
-        }
-        else if (arg.find("SVGA") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::SVGA;
-            cout << "[Sample] Using Camera in resolution SVGA" << endl;
-        }
-        else if (arg.find("VGA") != string::npos)
-        {
-            param.camera_resolution = RESOLUTION::VGA;
-            cout << "[Sample] Using Camera in resolution VGA" << endl;
+            show_2d_viewer = true;
+            show_3d_viewer = true;
+            cout << "[Sample] 3D viewer is enabled" << endl;
+            continue;
         }
 
-        if (arg.find("RECORD") != string::npos)
+        if (arg.find(".svo") != string::npos)
         {
-            record_video = true;
-            cout << "[Sample] Recording is enabled" << endl;
+            param.input.setFromSVOFile(argv[i]);
+            cout << "[Sample] Using SVO File input: " << argv[i] << endl;
+        }
+        else if (arg.find(".svo") == string::npos)
+        {
+            unsigned int a, b, c, d, port;
+            if (sscanf(arg.c_str(), "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port) == 5)
+            {
+                // Stream input mode - IP + port
+                string ip_adress = to_string(a) + "." + to_string(b) + "." + to_string(c) + "." + to_string(d);
+                param.input.setFromStream(String(ip_adress.c_str()), port);
+                cout << "[Sample] Using Stream input, IP : " << ip_adress << ", port : " << port << endl;
+            }
+            else if (sscanf(arg.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) == 4)
+            {
+                // Stream input mode - IP only
+                param.input.setFromStream(String(argv[i]));
+                cout << "[Sample] Using Stream input, IP : " << argv[i] << endl;
+            }
+            else if (arg.find("HD2K") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::HD2K;
+                cout << "[Sample] Using Camera in resolution HD2K" << endl;
+            }
+            else if (arg.find("HD1200") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::HD1200;
+                cout << "[Sample] Using Camera in resolution HD1200" << endl;
+            }
+            else if (arg.find("HD1080") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::HD1080;
+                cout << "[Sample] Using Camera in resolution HD1080" << endl;
+            }
+            else if (arg.find("HD720") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::HD720;
+                cout << "[Sample] Using Camera in resolution HD720" << endl;
+            }
+            else if (arg.find("SVGA") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::SVGA;
+                cout << "[Sample] Using Camera in resolution SVGA" << endl;
+            }
+            else if (arg.find("VGA") != string::npos)
+            {
+                param.camera_resolution = RESOLUTION::VGA;
+                cout << "[Sample] Using Camera in resolution VGA" << endl;
+            }
+
+            if (arg.find("RECORD") != string::npos)
+            {
+                record_video = true;
+                cout << "[Sample] Recording is enabled" << endl;
+            }
         }
     }
 }
