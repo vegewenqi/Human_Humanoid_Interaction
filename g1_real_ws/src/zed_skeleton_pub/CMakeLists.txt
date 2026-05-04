@@ -95,7 +95,8 @@ install(TARGETS zed_skeleton_pub_node DESTINATION lib/${PROJECT_NAME})
 # Fusion skeleton node: dual ZED X + ZED Fusion API
 add_executable(fusion_zed_skeleton_pub_node
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/fusion_main.cpp
-  ${ZED_COMMON_SRC}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/FusionGLViewer.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/TrackingViewer.cpp
   ${ZED_HDR_FILES}
 )
 

@@ -1,7 +1,7 @@
 #include <sl/Camera.hpp>
 #include <sl/Fusion.hpp>
 
-#include "GLViewer.hpp"
+#include "FusionGLViewer.hpp"
 #include "TrackingViewer.hpp"
 
 #include <opencv2/opencv.hpp>
@@ -439,12 +439,12 @@ int main(int argc, char **argv)
     // ---------------------------------------------------------------------
     // Optional 3D viewer
     // ---------------------------------------------------------------------
-    std::unique_ptr<GLViewer> viewer_3d;
+    std::unique_ptr<FusionGLViewer> viewer_3d;
     Pose cam_pose;
     cam_pose.pose_data.setIdentity();
 
     if (show_3d_viewer) {
-        viewer_3d = std::make_unique<GLViewer>();
+        viewer_3d = std::make_unique<FusionGLViewer>();
         viewer_3d->init(argc, argv);
     }
 
@@ -454,6 +454,10 @@ int main(int argc, char **argv)
     Bodies fused_bodies;
     Bodies raw_bodies_for_2d;
     Bodies single_body;
+
+    // Used only by the official Fusion 3D viewer.
+    std::map<sl::CameraIdentifier, sl::Bodies> camera_raw_data;
+    sl::FusionMetrics metrics;
 
     std::string window_name = "ZEDposeDetect";
     int key_wait = 10;
@@ -479,6 +483,30 @@ int main(int argc, char **argv)
 
             fusion.retrieveBodies(fused_bodies, body_tracker_parameters_rt);
 
+            // If 3D Fusion viewer is enabled, also retrieve each camera's raw body data,
+            // camera pose, and fusion metrics for the official Fusion viewer.
+            if (show_3d_viewer && viewer_3d) {
+                for (auto &id : fusion_camera_ids) {
+                    fusion.retrieveBodies(
+                        camera_raw_data[id],
+                        body_tracker_parameters_rt,
+                        id
+                    );
+
+                    sl::Pose pose;
+                    if (fusion.getPosition(
+                            pose,
+                            sl::REFERENCE_FRAME::WORLD,
+                            id,
+                            sl::POSITION_TYPE::RAW
+                        ) == sl::POSITIONAL_TRACKING_STATE::OK) {
+                        viewer_3d->setCameraPose(id.sn, pose.pose_data);
+                    }
+                }
+
+                fusion.getProcessMetrics(metrics);
+            }
+
             int best_idx = selectBestBodyIndex(fused_bodies);
 
             single_body.body_list.clear();
@@ -499,9 +527,8 @@ int main(int argc, char **argv)
                 sensor_msgs::msg::PointCloud2 cloud;
                 cloud.header.stamp = node->get_clock()->now();
 
-                // Keep the original frame_id for downstream compatibility.
                 // Note: now this is Fusion world, not single-camera world.
-                cloud.header.frame_id = "zed_world";
+                cloud.header.frame_id = "fusion_world";
 
                 cloud.height = 1;
                 cloud.width = static_cast<uint32_t>(body.keypoint.size());
@@ -610,7 +637,11 @@ int main(int argc, char **argv)
                 }
 
                 if (show_3d_viewer && viewer_3d) {
-                    viewer_3d->updateData(single_body, cam_pose.pose_data);
+                    viewer_3d->updateBodies(
+                        fused_bodies,
+                        camera_raw_data,
+                        metrics
+                    );
 
                     if (!viewer_3d->isAvailable()) {
                         quit = true;
