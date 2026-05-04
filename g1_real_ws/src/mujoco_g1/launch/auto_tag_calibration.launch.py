@@ -55,14 +55,15 @@ def generate_launch_description():
                 'tag_topic': '/tag_center_zed_world',
                 'lowstate_topic': '/lowstate',
                 'qdes_topic': '/calib_upperbody_q_des',
+                'vision_frame_name': 'zed_world',
 
-                'csv_path': '/ws/calibration/g1_tag_calibration_samples.csv',
-                'result_path': '/ws/calibration/g1_tag_extrinsic_result.json',
+                'csv_path': '/ws/calibration/single_g1_tag_calibration_samples.csv',
+                'result_path': '/ws/calibration/single_g1_tag_extrinsic_result.json',
 
                 'tag_frame': 'torso_link',
-                'tag_offset_x': 0.08,
-                'tag_offset_y': 0.0,
-                'tag_offset_z': 0.125,
+                'tag_offset_x': 0.11613403306399124,
+                'tag_offset_y': 0.0088534098559534,
+                'tag_offset_z': 0.13122103529705606,
 
                 'roll_amp': 0.08,
                 'pitch_amp': 0.08,
@@ -75,4 +76,36 @@ def generate_launch_description():
                 'max_retries_per_pose': 2,
             }],
         ),
+
+        # Node(
+        #     package='g1_cbf',
+        #     executable='calibration_sampler_node',
+        #     name='calibration_sampler_node',
+        #     output='screen',
+        #     parameters=[{
+        #         'urdf_path': urdf_path,
+        #         'tag_topic': '/tag_center_fusion_world',
+        #         'lowstate_topic': '/lowstate',
+        #         'qdes_topic': '/calib_upperbody_q_des',
+        #         'vision_frame_name': 'fusion_world',
+
+        #         'csv_path': '/ws/calibration/fusion_g1_tag_calibration_samples.csv',
+        #         'result_path': '/ws/calibration/fusion_g1_tag_extrinsic_result.json',
+
+        #         'tag_frame': 'torso_link',
+        #         'tag_offset_x': 0.11613403306399124,
+        #         'tag_offset_y': 0.0088534098559534,
+        #         'tag_offset_z': 0.13122103529705606,
+
+        #         'roll_amp': 0.08,
+        #         'pitch_amp': 0.08,
+        #         'start_delay_sec': 5.0,
+        #         'settle_sec': 5.0,
+        #         'sample_sec': 1.0,
+        #         'tag_timeout_sec': 0.30,
+        #         'max_zed_std_m': 0.015,
+        #         'max_robot_std_m': 0.005,
+        #         'max_retries_per_pose': 2,
+        #     }],
+        # ),
     ])

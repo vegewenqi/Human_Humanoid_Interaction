@@ -77,6 +77,7 @@ class AutoCalibrationSampler(Node):
         self.declare_parameter('tag_offset_x', 0.11613403306399124)
         self.declare_parameter('tag_offset_y', 0.008857834098559534)
         self.declare_parameter('tag_offset_z', 0.13122103529705606)
+        self.declare_parameter('vision_frame_name', 'zed_world')
 
         self.declare_parameter('control_dt', 0.02)
         self.declare_parameter('start_delay_sec', 4.0)
@@ -102,6 +103,7 @@ class AutoCalibrationSampler(Node):
             float(self.get_parameter('tag_offset_y').value),
             float(self.get_parameter('tag_offset_z').value),
         ], dtype=np.float64)
+        self.vision_frame_name = self.get_parameter('vision_frame_name').value
 
         self.kin = CalibrationKinematics(
             urdf_path=urdf_path,
@@ -568,7 +570,7 @@ class AutoCalibrationSampler(Node):
         quat_xyzw = Rotation.from_matrix(R).as_quat()
 
         result = {
-            'mapping': 'p_pelvis = R @ p_zed_world + t',
+            'mapping': f'p_pelvis = R @ p_{self.vision_frame_name} + t',
             'method': 'joint_optimization_extrinsic_and_tag_offset',
             'num_samples': int(len(self.samples)),
             'R': R.tolist(),

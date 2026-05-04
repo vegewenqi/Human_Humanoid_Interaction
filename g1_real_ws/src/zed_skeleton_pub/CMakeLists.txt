@@ -157,3 +157,36 @@ ament_target_dependencies(zed_calibration_node
 install(TARGETS zed_calibration_node DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
+
+# -----------------------------
+# Calibration node (fusion version)
+add_executable(fusion_zed_calibration_node
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src/fusion_calibration_main.cpp
+  ${ZED_COMMON_SRC}
+  ${ZED_HDR_FILES}
+)
+
+target_include_directories(fusion_zed_calibration_node PRIVATE
+  ${OpenCV_INCLUDE_DIRS}
+  ${ZED_INCLUDE_DIRS}
+  ${GLEW_INCLUDE_DIRS}
+  ${GLUT_INCLUDE_DIR}
+  ${CUDA_INCLUDE_DIRS}
+  ${APRILTAG_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include
+)
+
+target_link_libraries(fusion_zed_calibration_node
+  ${ZED_LIBS}
+  ${OPENGL_LIBRARIES}
+  ${GLUT_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${APRILTAG_LIBRARIES}
+)
+
+ament_target_dependencies(fusion_zed_calibration_node
+  rclcpp sensor_msgs std_msgs geometry_msgs
+)
+
+install(TARGETS fusion_zed_calibration_node DESTINATION lib/${PROJECT_NAME})
