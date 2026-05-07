@@ -15,7 +15,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, String
 from scipy.spatial.transform import Rotation as Rot
 import tf2_ros
 
@@ -112,6 +112,9 @@ class G1CBFNode(Node):
         self.declare_parameter('enable_distance_viz', True)
         self.declare_parameter('log_summary', False)
         self.declare_parameter('summary_period_sec', 1.0)
+        self.declare_parameter('enable_diagnostics', True)
+        self.declare_parameter('diagnostics_topic', '/cbf/diagnostics')
+        self.declare_parameter('diagnostics_pair_topic', '/cbf/min_control_pair')
 
         # Set JAX config before importing cbf module
         use_gpu = self.get_parameter('use_gpu').value
@@ -181,6 +184,11 @@ class G1CBFNode(Node):
         self.summary_period_sec = float(
             self.get_parameter('summary_period_sec').value
         )
+        self.enable_diagnostics = bool(
+            self.get_parameter('enable_diagnostics').value
+        )
+        diagnostics_topic = self.get_parameter('diagnostics_topic').value
+        diagnostics_pair_topic = self.get_parameter('diagnostics_pair_topic').value
 
         if not urdf_path:
             self.get_logger().fatal('urdf_path parameter is required')
@@ -203,7 +211,8 @@ class G1CBFNode(Node):
             f'viz: enable_robot_caps_viz={self.enable_robot_caps_viz}, '
             f'enable_distance_viz={self.enable_distance_viz}, '
             f'log_summary={self.log_summary}, '
-            f'summary_period_sec={self.summary_period_sec:.2f}'
+            f'summary_period_sec={self.summary_period_sec:.2f}, '
+            f'enable_diagnostics={self.enable_diagnostics}'
         )
 
         # ---------------- Subsystems ----------------
@@ -287,6 +296,12 @@ class G1CBFNode(Node):
         self._summary_last_total_ms = 0.0
         self._summary_last_qp_ms = 0.0
 
+        # Diagnostics state. Pair ids are assigned lazily and remain stable
+        # within one node run. The numeric topic is intended for logging;
+        # the string topic gives the human-readable closest active pair.
+        self._diag_pair_to_id = {}
+        self._diag_next_pair_id = 0
+
         # ---------------- Subscribers ----------------
         self.create_subscription(
             JointState, joint_state_topic,
@@ -316,6 +331,15 @@ class G1CBFNode(Node):
         self.cmd_pub = self.create_publisher(
             JointState, safe_cmd_topic, 10,
         )
+        self.diag_pub = None
+        self.diag_pair_pub = None
+        if self.enable_diagnostics:
+            self.diag_pub = self.create_publisher(
+                Float32MultiArray, diagnostics_topic, 10,
+            )
+            self.diag_pair_pub = self.create_publisher(
+                String, diagnostics_pair_topic, 10,
+            )
 
         # ---------------- Timer ----------------
         self.create_timer(dt, self._tick)
@@ -330,6 +354,10 @@ class G1CBFNode(Node):
             f'enable_human_collision={self.enable_human_collision}, '
             f'enable_box_obstacles={self.enable_box_obstacles}'
         )
+        if self.enable_diagnostics:
+            self.get_logger().info(
+                f'diagnostics: numeric={diagnostics_topic}, pair={diagnostics_pair_topic}'
+            )
         self.get_logger().info(
             f'g1_cbf_node ready — timer period={dt:.3f}s ({1.0/dt:.0f} Hz target)'
         )
@@ -538,28 +566,29 @@ class G1CBFNode(Node):
 
         constraints = []
         closest_points = []
+        constraint_infos = []  # list of (control_barrier_value, pair_label)
 
         # self collision
         if self.enable_self_collision:
             if self.geom_type == 'boxes':
                 self._build_box_constraints(
-                    constraints, closest_points,
+                    constraints, closest_points, constraint_infos,
                 )
             else:
                 self._build_capsule_constraints(
-                    robot_endpoints, constraints, closest_points,
+                    robot_endpoints, constraints, closest_points, constraint_infos,
                 )
 
         # human collision
         if self.enable_human_collision and self.human_capsules:
             self._build_human_capsule_constraints(
-                robot_endpoints, constraints, closest_points,
+                robot_endpoints, constraints, closest_points, constraint_infos,
             )
 
         # optional box obstacles
         if self.enable_box_obstacles and self._obstacles:
             self._build_obstacle_constraints(
-                constraints, closest_points,
+                constraints, closest_points, constraint_infos,
             )
 
         # Publish distance lines
@@ -591,10 +620,23 @@ class G1CBFNode(Node):
         self.cmd_pub.publish(safe_msg)
 
         t1 = time.perf_counter()
+        total_ms = (t1 - t0) * 1000.0
+        qp_ms = (t_qp1 - t_qp0) * 1000.0
+        self._publish_diagnostics(
+            stamp=stamp,
+            n_constraints=len(constraints),
+            total_ms=total_ms,
+            qp_ms=qp_ms,
+            dq_ref=dq_ref,
+            dq_safe=dq_safe,
+            q_target=self.q_cbf_target,
+            q_nominal=self.q_des_latest,
+            constraint_infos=constraint_infos,
+        )
         self._update_summary(
             n_constraints=len(constraints),
-            total_ms=(t1 - t0) * 1000.0,
-            qp_ms=(t_qp1 - t_qp0) * 1000.0,
+            total_ms=total_ms,
+            qp_ms=qp_ms,
         )
 
     # ------------------------------------------------------------------
@@ -615,7 +657,7 @@ class G1CBFNode(Node):
             }
         return endpoints
 
-    def _build_capsule_constraints(self, robot_endpoints, constraints, closest_points):
+    def _build_capsule_constraints(self, robot_endpoints, constraints, closest_points, constraint_infos):
         for nameA, nameB in COLLISION_PAIRS:
             eA, eB = robot_endpoints[nameA], robot_endpoints[nameB]
             if not self._pair_is_active_by_segment_distance(
@@ -630,11 +672,15 @@ class G1CBFNode(Node):
                 need_closest_points=self.enable_distance_viz,
             )
             constraints.append((A_row, b_val))
+            h_val = self._capsule_control_barrier_value(
+                phi, eA['radius'], eB['radius'], self.self_cbf,
+            )
+            constraint_infos.append((h_val, f'rr:{nameA}__{nameB}'))
             if p1 is not None and p2 is not None:
                 closest_points.append((p1, p2))
 
     def _build_human_capsule_constraints(
-        self, robot_endpoints, constraints, closest_points
+        self, robot_endpoints, constraints, closest_points, constraint_infos
     ):
         zero_J_template = None
         for robot_name, human_name in ROBOT_HUMAN_COLLISION_PAIRS:
@@ -678,10 +724,14 @@ class G1CBFNode(Node):
                 v_b2=vHb,
             )
             constraints.append((A_row, b_val))
+            h_val = self._capsule_control_barrier_value(
+                phi, eR['radius'], eH['radius'], self.human_cbf,
+            )
+            constraint_infos.append((h_val, f'hr:{robot_name}__{human_name}'))
             if p1 is not None and p2 is not None:
                 closest_points.append((p1, p2))
 
-    def _build_box_constraints(self, constraints, closest_points):
+    def _build_box_constraints(self, constraints, closest_points, constraint_infos):
         for nameA, nameB in COLLISION_PAIRS:
             bodyA = self.kin.collision_bodies[nameA]
             bodyB = self.kin.collision_bodies[nameB]
@@ -695,9 +745,11 @@ class G1CBFNode(Node):
                 bodyB, centerB, rotB, J6_B,
             )
             constraints.append((A_row, b_val))
+            h_val = float(alpha) - float(self.self_cbf.beta)
+            constraint_infos.append((h_val, f'rr_box:{nameA}__{nameB}'))
             closest_points.append((p1, p2))
 
-    def _build_obstacle_constraints(self, constraints, closest_points):
+    def _build_obstacle_constraints(self, constraints, closest_points, constraint_infos):
         from g1_cbf.cbf import _box_b_from_half_extents
 
         for obs in self._obstacles:
@@ -713,11 +765,92 @@ class G1CBFNode(Node):
                     b_override_B=obs_b,
                 )
                 constraints.append((A_row, b_val))
+                h_val = float(alpha) - float(self.box_cbf.beta)
+                constraint_infos.append((h_val, f'obstacle:{body_name}'))
                 closest_points.append((p1, p2))
 
     # ------------------------------------------------------------------
     # Logging / summary
     # ------------------------------------------------------------------
+
+    def _publish_diagnostics(
+        self,
+        *,
+        stamp,
+        n_constraints,
+        total_ms,
+        qp_ms,
+        dq_ref,
+        dq_safe,
+        q_target,
+        q_nominal,
+        constraint_infos,
+    ):
+        if not self.enable_diagnostics or self.diag_pub is None:
+            return
+
+        dq_ref_norm = float(np.linalg.norm(dq_ref))
+        dq_safe_norm = float(np.linalg.norm(dq_safe))
+        correction_norm = float(np.linalg.norm(q_target - q_nominal))
+        qp_status = 1.0 if np.all(np.isfinite(dq_safe)) else 0.0
+
+        min_h = float('nan')
+        min_pair = 'none'
+        pair_id = -1.0
+        if constraint_infos:
+            finite_infos = [
+                (float(h), str(pair))
+                for h, pair in constraint_infos
+                if np.isfinite(float(h))
+            ]
+            if finite_infos:
+                min_h, min_pair = min(finite_infos, key=lambda x: x[0])
+                pair_id = float(self._get_pair_id(min_pair))
+
+        msg = Float32MultiArray()
+        # Layout:
+        # [0] n_constraints
+        # [1] total_ms
+        # [2] qp_ms
+        # [3] dq_ref_norm
+        # [4] dq_safe_norm
+        # [5] correction_norm = ||q_cbf - q_nom||_2
+        # [6] min_control_barrier_value h_i used by the controller
+        # [7] qp_status_code: 1.0 = finite solution returned, 0.0 = nonfinite
+        # [8] min_control_pair_id; see diagnostics_pair_topic for label
+        msg.data = [
+            float(n_constraints),
+            float(total_ms),
+            float(qp_ms),
+            dq_ref_norm,
+            dq_safe_norm,
+            correction_norm,
+            float(min_h),
+            qp_status,
+            pair_id,
+        ]
+        self.diag_pub.publish(msg)
+
+        if self.diag_pair_pub is not None:
+            pair_msg = String()
+            pair_msg.data = min_pair
+            self.diag_pair_pub.publish(pair_msg)
+
+    def _get_pair_id(self, pair_label):
+        if pair_label not in self._diag_pair_to_id:
+            self._diag_pair_to_id[pair_label] = self._diag_next_pair_id
+            self._diag_next_pair_id += 1
+        return self._diag_pair_to_id[pair_label]
+
+    @staticmethod
+    def _capsule_control_barrier_value(phi, radius_a, radius_b, cbf_obj):
+        safety_distance = getattr(cbf_obj, 'safety_distance', None)
+        if safety_distance is not None:
+            r_sum = float(radius_a) + float(radius_b)
+            margin_phi_eff = (r_sum + float(safety_distance)) ** 2 - r_sum ** 2
+        else:
+            margin_phi_eff = float(getattr(cbf_obj, 'margin_phi', 0.0))
+        return float(phi) - float(margin_phi_eff)
 
     def _update_summary(self, n_constraints, total_ms, qp_ms):
         if not self.log_summary:

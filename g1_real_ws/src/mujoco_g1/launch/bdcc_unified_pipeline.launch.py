@@ -45,6 +45,56 @@ def generate_launch_description():
     # -------- misc params --------
     mjcf_path = LaunchConfiguration("mjcf_path")
 
+    # -------- CBF sweep parameters --------
+    sim_rr_safety_distance = LaunchConfiguration("sim_rr_safety_distance")
+    sim_hr_safety_distance = LaunchConfiguration("sim_hr_safety_distance")
+    sim_rr_gamma = LaunchConfiguration("sim_rr_gamma")
+    sim_hr_gamma = LaunchConfiguration("sim_hr_gamma")
+    real_rr_safety_distance = LaunchConfiguration("real_rr_safety_distance")
+    real_hr_safety_distance = LaunchConfiguration("real_hr_safety_distance")
+    real_rr_gamma = LaunchConfiguration("real_rr_gamma")
+    real_hr_gamma = LaunchConfiguration("real_hr_gamma")
+
+    # -------- CBF diagnostics topics --------
+    sim_cbf_diagnostics_topic = LaunchConfiguration("sim_cbf_diagnostics_topic")
+    sim_cbf_diagnostics_pair_topic = LaunchConfiguration("sim_cbf_diagnostics_pair_topic")
+    real_cbf_diagnostics_topic = LaunchConfiguration("real_cbf_diagnostics_topic")
+    real_cbf_diagnostics_pair_topic = LaunchConfiguration("real_cbf_diagnostics_pair_topic")
+
+    # -------- human capsule radii --------
+    human_torso_radius_sim = LaunchConfiguration("human_torso_radius_sim")
+    human_upper_arm_radius_sim = LaunchConfiguration("human_upper_arm_radius_sim")
+    human_forearm_radius_sim = LaunchConfiguration("human_forearm_radius_sim")
+    human_thigh_radius_sim = LaunchConfiguration("human_thigh_radius_sim")
+    human_shin_radius_sim = LaunchConfiguration("human_shin_radius_sim")
+    human_head_radius_sim = LaunchConfiguration("human_head_radius_sim")
+    human_torso_radius_real = LaunchConfiguration("human_torso_radius_real")
+    human_upper_arm_radius_real = LaunchConfiguration("human_upper_arm_radius_real")
+    human_forearm_radius_real = LaunchConfiguration("human_forearm_radius_real")
+    human_thigh_radius_real = LaunchConfiguration("human_thigh_radius_real")
+    human_shin_radius_real = LaunchConfiguration("human_shin_radius_real")
+    human_head_radius_real = LaunchConfiguration("human_head_radius_real")
+
+    # If run_real is true, use the real-human radius profile; otherwise use sim.
+    human_torso_radius = PythonExpression([
+        human_torso_radius_real, " if '", run_real, "' == 'true' else ", human_torso_radius_sim
+    ])
+    human_upper_arm_radius = PythonExpression([
+        human_upper_arm_radius_real, " if '", run_real, "' == 'true' else ", human_upper_arm_radius_sim
+    ])
+    human_forearm_radius = PythonExpression([
+        human_forearm_radius_real, " if '", run_real, "' == 'true' else ", human_forearm_radius_sim
+    ])
+    human_thigh_radius = PythonExpression([
+        human_thigh_radius_real, " if '", run_real, "' == 'true' else ", human_thigh_radius_sim
+    ])
+    human_shin_radius = PythonExpression([
+        human_shin_radius_real, " if '", run_real, "' == 'true' else ", human_shin_radius_sim
+    ])
+    human_head_radius = PythonExpression([
+        human_head_radius_real, " if '", run_real, "' == 'true' else ", human_head_radius_sim
+    ])
+
     g1_urdf = PathJoinSubstitution([
         FindPackageShare("g1_description"),
         "urdf",
@@ -122,6 +172,40 @@ def generate_launch_description():
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
+        # CBF sweep parameters. Defaults preserve the previous sim/real values.
+        DeclareLaunchArgument("sim_rr_safety_distance", default_value="0.05"),
+        DeclareLaunchArgument("sim_hr_safety_distance", default_value="0.15"),
+        DeclareLaunchArgument("sim_rr_gamma", default_value="2.0"),
+        DeclareLaunchArgument("sim_hr_gamma", default_value="4.0"),
+        
+        DeclareLaunchArgument("real_rr_safety_distance", default_value="0.015"),
+        DeclareLaunchArgument("real_hr_safety_distance", default_value="0.10"),
+        DeclareLaunchArgument("real_rr_gamma", default_value="2.0"),
+        DeclareLaunchArgument("real_hr_gamma", default_value="4.0"),
+
+        # CBF diagnostics topics. The numeric Float32MultiArray layout is documented
+        # in g1_cbf_node.py; the pair topic publishes the current min-pair label.
+        DeclareLaunchArgument("sim_cbf_diagnostics_topic", default_value="/sim/cbf/diagnostics"),
+        DeclareLaunchArgument("sim_cbf_diagnostics_pair_topic", default_value="/sim/cbf/min_control_pair"),
+        DeclareLaunchArgument("real_cbf_diagnostics_topic", default_value="/real/cbf/diagnostics"),
+        DeclareLaunchArgument("real_cbf_diagnostics_pair_topic", default_value="/real/cbf/min_control_pair"),
+
+        # Human capsule radii. When run_real:=true, the real profile is used;
+        # otherwise the sim profile is used.
+        DeclareLaunchArgument("human_torso_radius_sim", default_value="0.15"),
+        DeclareLaunchArgument("human_upper_arm_radius_sim", default_value="0.09"),
+        DeclareLaunchArgument("human_forearm_radius_sim", default_value="0.10"),
+        DeclareLaunchArgument("human_thigh_radius_sim", default_value="0.08"),
+        DeclareLaunchArgument("human_shin_radius_sim", default_value="0.07"),
+        DeclareLaunchArgument("human_head_radius_sim", default_value="0.08"),
+
+        DeclareLaunchArgument("human_torso_radius_real", default_value="0.1"),
+        DeclareLaunchArgument("human_upper_arm_radius_real", default_value="0.05"),
+        DeclareLaunchArgument("human_forearm_radius_real", default_value="0.04"),
+        DeclareLaunchArgument("human_thigh_radius_real", default_value="0.065"),
+        DeclareLaunchArgument("human_shin_radius_real", default_value="0.055"),
+        DeclareLaunchArgument("human_head_radius_real", default_value="0.08"),
+
         # ---------------- shared ZED skeleton points pre-processor ----------------
         Node(
             package="mujoco_g1",
@@ -153,12 +237,12 @@ def generate_launch_description():
                 "capsule_zed_topic": "/human_capsules_zed",
                 "capsule_local_topic": "/human_capsules_local",
 
-                "torso_radius": 0.15,
-                "upper_arm_radius": 0.09,
-                "forearm_radius": 0.10,
-                "thigh_radius": 0.08,
-                "shin_radius": 0.07,
-                "head_radius": 0.08,
+                "torso_radius": human_torso_radius,
+                "upper_arm_radius": human_upper_arm_radius,
+                "forearm_radius": human_forearm_radius,
+                "thigh_radius": human_thigh_radius,
+                "shin_radius": human_shin_radius,
+                "head_radius": human_head_radius,
             }],
         ),
 
@@ -296,10 +380,10 @@ def generate_launch_description():
                     "K": 30.0,
                     "max_velocity": 3.0,
                     "lpf_gain": 1.0,
-                    "rr_safety_distance": 0.05,
-                    "rr_gamma": 2.0,
-                    "hr_safety_distance": 0.15,
-                    "hr_gamma": 4.0,
+                    "rr_safety_distance": sim_rr_safety_distance,
+                    "rr_gamma": sim_rr_gamma,
+                    "hr_safety_distance": sim_hr_safety_distance,
+                    "hr_gamma": sim_hr_gamma,
 
                     # "use_gpu": True,
 
@@ -307,6 +391,9 @@ def generate_launch_description():
                     "enable_distance_viz": True,
                     "log_summary": True,
                     "summary_period_sec": 1.0,
+                    "enable_diagnostics": True,
+                    "diagnostics_topic": sim_cbf_diagnostics_topic,
+                    "diagnostics_pair_topic": sim_cbf_diagnostics_pair_topic,
                     "enable_coarse_gating": True,
                     "coarse_distance_activate": 0.55,
 
@@ -496,10 +583,10 @@ def generate_launch_description():
                     "K": 30.0,
                     "max_velocity": 3.0,
                     "lpf_gain": 1.0,
-                    "rr_safety_distance": 0.015,
-                    "rr_gamma": 2.0,
-                    "hr_safety_distance": 0.10,
-                    "hr_gamma": 4.0,
+                    "rr_safety_distance": real_rr_safety_distance,
+                    "rr_gamma": real_rr_gamma,
+                    "hr_safety_distance": real_hr_safety_distance,
+                    "hr_gamma": real_hr_gamma,
 
                     # "use_gpu": True,
 
@@ -507,6 +594,9 @@ def generate_launch_description():
                     "enable_distance_viz": True,
                     "log_summary": True,
                     "summary_period_sec": 1.0,
+                    "enable_diagnostics": True,
+                    "diagnostics_topic": real_cbf_diagnostics_topic,
+                    "diagnostics_pair_topic": real_cbf_diagnostics_pair_topic,
                     "enable_coarse_gating": True,
                     "coarse_distance_activate": 0.55,
 
