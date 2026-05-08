@@ -192,19 +192,19 @@ def generate_launch_description():
 
         # Human capsule radii. When run_real:=true, the real profile is used;
         # otherwise the sim profile is used.
-        DeclareLaunchArgument("human_torso_radius_sim", default_value="0.15"),
-        DeclareLaunchArgument("human_upper_arm_radius_sim", default_value="0.09"),
-        DeclareLaunchArgument("human_forearm_radius_sim", default_value="0.10"),
-        DeclareLaunchArgument("human_thigh_radius_sim", default_value="0.08"),
-        DeclareLaunchArgument("human_shin_radius_sim", default_value="0.07"),
-        DeclareLaunchArgument("human_head_radius_sim", default_value="0.08"),
-
-        DeclareLaunchArgument("human_torso_radius_real", default_value="0.1"),
-        DeclareLaunchArgument("human_upper_arm_radius_real", default_value="0.05"),
-        DeclareLaunchArgument("human_forearm_radius_real", default_value="0.04"),
-        DeclareLaunchArgument("human_thigh_radius_real", default_value="0.065"),
-        DeclareLaunchArgument("human_shin_radius_real", default_value="0.055"),
+        DeclareLaunchArgument("human_torso_radius_real", default_value="0.15"),
+        DeclareLaunchArgument("human_upper_arm_radius_real", default_value="0.09"),
+        DeclareLaunchArgument("human_forearm_radius_real", default_value="0.10"),
+        DeclareLaunchArgument("human_thigh_radius_real", default_value="0.08"),
+        DeclareLaunchArgument("human_shin_radius_real", default_value="0.07"),
         DeclareLaunchArgument("human_head_radius_real", default_value="0.08"),
+
+        DeclareLaunchArgument("human_torso_radius_sim", default_value="0.1"),
+        DeclareLaunchArgument("human_upper_arm_radius_sim", default_value="0.05"),
+        DeclareLaunchArgument("human_forearm_radius_sim", default_value="0.04"),
+        DeclareLaunchArgument("human_thigh_radius_sim", default_value="0.065"),
+        DeclareLaunchArgument("human_shin_radius_sim", default_value="0.055"),
+        DeclareLaunchArgument("human_head_radius_sim", default_value="0.08"),
 
         # ---------------- shared ZED skeleton points pre-processor ----------------
         Node(
