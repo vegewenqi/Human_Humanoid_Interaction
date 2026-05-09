@@ -96,14 +96,14 @@ class HumanCapsuleFrameTransform(Node):
 
     mode = "real_quick_cali":
       input must be /human_capsules_zed
-      subscribe pelvis from /human_pelvis_point_zed
-      after startup_delay_sec, average first N pelvis frames:
-          p_pelvis_ref = mean(pelvis_zed[0:N])
+      subscribe upper-body anchor from /human_upper_body_anchor_zed
+      after startup_delay_sec, average first N anchor frames:
+          p_anchor_ref = mean(anchor_zed[0:N])
       then:
-          p_target = R_extrinsic * (p_zed - p_pelvis_ref) + t_extrinsic
+          p_target = R_extrinsic * (p_zed - p_anchor_ref) + t_extrinsic
 
       Here extrinsic_* keeps the SAME parameter names, but means:
-      place the averaged initial human pelvis into robot pelvis frame.
+      place the averaged initial human upper-body anchor into robot frame.
     """
 
     def __init__(self):
@@ -144,7 +144,7 @@ class HumanCapsuleFrameTransform(Node):
         self.declare_parameter("footprint_line_width", 0.012)
 
         # quick calibration params
-        self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
+        self.declare_parameter("anchor_topic", "/human_upper_body_anchor_zed")
         self.declare_parameter("bootstrap_num_frames", 50)
         self.declare_parameter("startup_delay_sec", 5.0)
 
@@ -185,7 +185,7 @@ class HumanCapsuleFrameTransform(Node):
             float(self.get_parameter("extrinsic_tz").value),
         ], dtype=np.float64)
 
-        self.pelvis_topic = str(self.get_parameter("pelvis_topic").value)
+        self.anchor_topic = str(self.get_parameter("anchor_topic").value)
         self.bootstrap_num_frames = int(self.get_parameter("bootstrap_num_frames").value)
         self.startup_delay_sec = float(self.get_parameter("startup_delay_sec").value)
         
@@ -229,18 +229,18 @@ class HumanCapsuleFrameTransform(Node):
         )
 
         # quick calibration state
-        self.sub_pelvis = None
+        self.sub_anchor = None
         self.bootstrap_done = False
         self.bootstrap_samples = []
-        self.pelvis_ref_zed: Optional[np.ndarray] = None
+        self.anchor_ref_zed: Optional[np.ndarray] = None
         self.quick_cali_start_time: Optional[float] = None
         self.quick_cali_started = False
 
         if self.mode == "real_quick_cali":
-            self.sub_pelvis = self.create_subscription(
+            self.sub_anchor = self.create_subscription(
                 Float32MultiArray,
-                self.pelvis_topic,
-                self.on_pelvis,
+                self.anchor_topic,
+                self.on_anchor,
                 10,
             )
             self.quick_cali_start_time = time.time() + self.startup_delay_sec
@@ -267,7 +267,7 @@ class HumanCapsuleFrameTransform(Node):
 
         elif self.mode == "real_quick_cali":
             self.get_logger().info(
-                f"real_quick_cali pelvis_topic = {self.pelvis_topic}"
+                f"real_quick_cali anchor_topic = {self.anchor_topic}"
             )
             self.get_logger().info(
                 f"real_quick_cali bootstrap_num_frames = {self.bootstrap_num_frames}"
@@ -276,7 +276,7 @@ class HumanCapsuleFrameTransform(Node):
                 f"real_quick_cali startup_delay_sec = {self.startup_delay_sec:.2f}"
             )
             self.get_logger().info(
-                "real_quick_cali meaning of extrinsic_*: place averaged initial human pelvis into robot pelvis frame."
+                "real_quick_cali meaning of extrinsic_*: place averaged initial human upper-body anchor into robot frame."
             )
             self.get_logger().info(
                 f"real_quick_cali placement t=({self.t_extrinsic[0]:.3f}, {self.t_extrinsic[1]:.3f}, {self.t_extrinsic[2]:.3f})"
@@ -287,7 +287,7 @@ class HumanCapsuleFrameTransform(Node):
                 f"Unknown mode '{self.mode}', expected 'sim', 'real_cali', or 'real_quick_cali'."
             )
 
-    def on_pelvis(self, msg: Float32MultiArray):
+    def on_anchor(self, msg: Float32MultiArray):
         if self.mode != "real_quick_cali":
             return
 
@@ -298,7 +298,7 @@ class HumanCapsuleFrameTransform(Node):
         if not self.quick_cali_started:
             self.quick_cali_started = True
             self.get_logger().info(
-                f"Startup delay finished. Collecting {self.bootstrap_num_frames} valid pelvis frames..."
+                f"Startup delay finished. Collecting {self.bootstrap_num_frames} valid upper-body anchor frames..."
             )
 
         if self.bootstrap_done:
@@ -317,19 +317,19 @@ class HumanCapsuleFrameTransform(Node):
 
         if n == 1 or n == self.bootstrap_num_frames or n % 5 == 0:
             self.get_logger().info(
-                f"Pelvis capture progress: {n}/{self.bootstrap_num_frames}"
+                f"Upper-body anchor capture progress: {n}/{self.bootstrap_num_frames}"
             )
 
         if n >= self.bootstrap_num_frames:
             stack = np.stack(self.bootstrap_samples, axis=0)
-            self.pelvis_ref_zed = np.mean(stack, axis=0)
+            self.anchor_ref_zed = np.mean(stack, axis=0)
             self.bootstrap_done = True
 
             self.get_logger().info(
-                "Pelvis reference captured from averaged frames: "
-                f"[{self.pelvis_ref_zed[0]:.4f}, "
-                f"{self.pelvis_ref_zed[1]:.4f}, "
-                f"{self.pelvis_ref_zed[2]:.4f}]"
+                "Upper-body anchor reference captured from averaged frames: "
+                f"[{self.anchor_ref_zed[0]:.4f}, "
+                f"{self.anchor_ref_zed[1]:.4f}, "
+                f"{self.anchor_ref_zed[2]:.4f}]"
             )
 
     def transform_point(self, p: np.ndarray) -> np.ndarray:
@@ -341,9 +341,9 @@ class HumanCapsuleFrameTransform(Node):
             return self.R_extrinsic @ p + self.t_extrinsic
 
         elif self.mode == "real_quick_cali":
-            if self.pelvis_ref_zed is None:
+            if self.anchor_ref_zed is None:
                 return p.copy()
-            return self.R_extrinsic @ (p - self.pelvis_ref_zed) + self.t_extrinsic
+            return self.R_extrinsic @ (p - self.anchor_ref_zed) + self.t_extrinsic
 
         else:
             return p.copy()
@@ -360,7 +360,7 @@ class HumanCapsuleFrameTransform(Node):
             return
 
         if self.mode == "real_quick_cali":
-            if not self.bootstrap_done or self.pelvis_ref_zed is None:
+            if not self.bootstrap_done or self.anchor_ref_zed is None:
                 now = time.time()
                 if self.quick_cali_start_time is not None and now < self.quick_cali_start_time:
                     remain = self.quick_cali_start_time - now
@@ -370,7 +370,7 @@ class HumanCapsuleFrameTransform(Node):
                     )
                 else:
                     self.get_logger().warn(
-                        "real_quick_cali collecting pelvis frames...",
+                        "real_quick_cali collecting upper-body anchor frames...",
                         throttle_duration_sec=1.0,
                     )
                 return

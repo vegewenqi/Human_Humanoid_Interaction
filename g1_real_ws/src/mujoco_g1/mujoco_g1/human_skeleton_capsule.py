@@ -77,6 +77,7 @@ class HumanSkeletonCapsuleNode(Node):
         self.declare_parameter("capsule_zed_topic", "/human_capsules_zed")
         self.declare_parameter("capsule_local_topic", "/human_capsules_local")
         self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
+        self.declare_parameter("upper_body_anchor_topic", "/human_upper_body_anchor_zed")
 
         self.input_points_topic = str(self.get_parameter("input_points_topic").value)
         self.input_conf_topic = str(self.get_parameter("input_conf_topic").value)
@@ -93,6 +94,7 @@ class HumanSkeletonCapsuleNode(Node):
         self.capsule_zed_topic = str(self.get_parameter("capsule_zed_topic").value)
         self.capsule_local_topic = str(self.get_parameter("capsule_local_topic").value)
         self.pelvis_topic = str(self.get_parameter("pelvis_topic").value)
+        self.upper_body_anchor_topic = str(self.get_parameter("upper_body_anchor_topic").value)
 
         self.latest_conf: Optional[int] = None
 
@@ -111,6 +113,9 @@ class HumanSkeletonCapsuleNode(Node):
         )
         self.pub_pelvis = self.create_publisher(
             Float32MultiArray, self.pelvis_topic, 10
+        )
+        self.pub_upper_body_anchor = self.create_publisher(
+            Float32MultiArray, self.upper_body_anchor_topic, 10
         )
 
         self.index_map = {
@@ -142,6 +147,7 @@ class HumanSkeletonCapsuleNode(Node):
         self.get_logger().info(f"capsule_zed_topic    = {self.capsule_zed_topic}")
         self.get_logger().info(f"capsule_local_topic  = {self.capsule_local_topic}")
         self.get_logger().info(f"pelvis_topic         = {self.pelvis_topic}")
+        self.get_logger().info(f"upper_body_anchor_topic = {self.upper_body_anchor_topic}")
 
     def on_conf(self, msg: UInt8):
         self.latest_conf = int(msg.data)
@@ -183,6 +189,28 @@ class HumanSkeletonCapsuleNode(Node):
             radius = self.head_radius
 
         return (center, center, radius)
+
+    def _estimate_upper_body_anchor(
+        self, pts: Dict[str, Optional[np.ndarray]]
+    ) -> Optional[np.ndarray]:
+        """
+        Stable upper-body reference point for robot-frame quick calibration.
+
+        Prefer both shoulders plus neck, because these are more relevant to
+        upper-body following and usually less affected by lower-body/root
+        fitting errors than pelvis. If neck is missing, fall back to the
+        shoulder midpoint.
+        """
+        candidates = []
+        for name in ["left_shoulder", "right_shoulder", "neck"]:
+            p = pts.get(name)
+            if is_valid_point(p):
+                candidates.append(p)
+
+        if len(candidates) >= 2:
+            return np.mean(np.stack(candidates, axis=0), axis=0)
+
+        return None
 
     def _build_capsules_from_points(
         self, pts: Dict[str, Optional[np.ndarray]]
@@ -336,6 +364,16 @@ class HumanSkeletonCapsuleNode(Node):
         msg_pelvis = Float32MultiArray()
         msg_pelvis.data = [float(pelvis_zed[0]), float(pelvis_zed[1]), float(pelvis_zed[2])]
         self.pub_pelvis.publish(msg_pelvis)
+
+        upper_body_anchor_zed = self._estimate_upper_body_anchor(pts)
+        if is_valid_point(upper_body_anchor_zed):
+            msg_anchor = Float32MultiArray()
+            msg_anchor.data = [
+                float(upper_body_anchor_zed[0]),
+                float(upper_body_anchor_zed[1]),
+                float(upper_body_anchor_zed[2]),
+            ]
+            self.pub_upper_body_anchor.publish(msg_anchor)
 
 
 def main(args=None):
