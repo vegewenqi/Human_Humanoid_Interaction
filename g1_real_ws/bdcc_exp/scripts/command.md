@@ -1,0 +1,104 @@
+## 启动pipeline
+ros2 launch mujoco_g1 bdcc_unified_pipeline.launch.py run_sim:=false run_real:=true use_cbf:=true
+
+## 录制
+chmod +x /ws/bdcc_exp/scripts/record/record_skeleton_segment.py
+
+## 测试录制 S1_self_collision
+python3 /ws/bdcc_exp/scripts/record/record_skeleton_segment.py \
+  --scenario S1_self_collision \
+  --outdir /ws/bdcc_exp/segments/S1_self_collision \
+  --duration 40 \
+  --start-on-enter \
+  --record-diagnostics \
+  --notes "Real robot CBF-enabled recording for self-collision segment."
+
+## 测试录制 S2_human_robot
+python3 /ws/bdcc_exp/scripts/record/record_skeleton_segment.py \
+  --scenario S2_human_robot \
+  --outdir /ws/bdcc_exp/segments/S2_human_robot \
+  --duration 40 \
+  --start-on-enter \
+  --record-diagnostics \
+  --notes "Real robot CBF-enabled recording for human-robot collision segment."
+
+
+## 检查
+ls -lh /ws/bdcc_exp/segments/S1_self_collision
+python3 - <<'PY'
+import numpy as np
+p="/ws/bdcc_exp/segments/S1_self_collision/skeleton_filtered.npz"
+d=np.load(p, allow_pickle=True)
+print(d.files)
+print("t shape:", d["t"].shape)
+print("points shape:", d["points"].shape)
+PY
+
+
+## 回放
+chmod +x /ws/bdcc_exp/scripts/replay/replay_skeleton_segment.py
+
+## 回放 S1_self_collision
+python3 /ws/bdcc_exp/scripts/replay/replay_skeleton_segment.py \
+  --segment /ws/bdcc_exp/segments/S1_self_collision \
+  --publish-mode filtered \
+  --start-delay 3.0 \
+  --replay-rate-hz 60 \
+  --time-scale 1.0
+
+## 回放 S2_human_robot
+python3 /ws/bdcc_exp/scripts/replay/replay_skeleton_segment.py \
+  --segment /ws/bdcc_exp/segments/S2_human_robot \
+  --publish-mode filtered \
+  --start-delay 3.0 \
+  --replay-rate-hz 60 \
+  --time-scale 1.0
+
+第一次建议不要加 --interpolate-points，这样每帧就是录制时的 filtered skeleton 原值
+
+
+## 回放记录
+chmod +x /ws/bdcc_exp/scripts/log/trial_topic_logger.py
+
+
+## 回放记录 S1_self_collision
+python3 /ws/bdcc_exp/scripts/log/trial_topic_logger.py \
+  --platform real \
+  --scenario S1_self_collision \
+  --mode cbf \
+  --run-id run_001 \
+  --outdir /ws/bdcc_exp/runs/real_default/S1_self_collision/run_001 \
+  --duration 45 \
+  --record-q-act \
+  --record-cbf-diagnostics \
+  --rr-safety-distance 0.015 \
+  --hr-safety-distance 0.10 \
+  --rr-gamma 2.0 \
+  --hr-gamma 4.0
+
+
+python3 /ws/bdcc_exp/scripts/log/trial_topic_logger.py \
+  --platform sim \
+  --scenario S1_self_collision \
+  --mode cbf \
+  --run-id run_001 \
+  --outdir /ws/bdcc_exp/runs/sim_default/S1_self_collision/run_001 \
+  --duration 45 \
+  --record-q-act \
+  --record-cbf-diagnostics \
+  --rr-safety-distance 0.05 \
+  --hr-safety-distance 0.15 \
+  --rr-gamma 2.0 \
+  --hr-gamma 4.0
+
+
+## 离线计算
+chmod +x /ws/bdcc_exp/scripts/offline/offline_compute_metrics.py
+
+python3 /ws/bdcc_exp/scripts/offline/offline_compute_metrics.py \
+  --run-dir /ws/bdcc_exp/runs/sim_default/S1_self_collision/run_001 \
+  --urdf-path /ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf \
+  --mode both \
+  --sample-rate-hz 50 \
+  --max-lag-sec 3.0 \
+  --lag-step-sec 0.02
