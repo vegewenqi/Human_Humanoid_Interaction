@@ -197,14 +197,14 @@ def generate_launch_description():
         DeclareLaunchArgument("human_forearm_radius_real", default_value="0.10"),
         DeclareLaunchArgument("human_thigh_radius_real", default_value="0.08"),
         DeclareLaunchArgument("human_shin_radius_real", default_value="0.07"),
-        DeclareLaunchArgument("human_head_radius_real", default_value="0.08"),
+        DeclareLaunchArgument("human_head_radius_real", default_value="0.10"),
 
-        DeclareLaunchArgument("human_torso_radius_sim", default_value="0.1"),
-        DeclareLaunchArgument("human_upper_arm_radius_sim", default_value="0.05"),
-        DeclareLaunchArgument("human_forearm_radius_sim", default_value="0.04"),
-        DeclareLaunchArgument("human_thigh_radius_sim", default_value="0.065"),
-        DeclareLaunchArgument("human_shin_radius_sim", default_value="0.055"),
-        DeclareLaunchArgument("human_head_radius_sim", default_value="0.08"),
+        DeclareLaunchArgument("human_torso_radius_sim", default_value="0.15"),
+        DeclareLaunchArgument("human_upper_arm_radius_sim", default_value="0.06"),
+        DeclareLaunchArgument("human_forearm_radius_sim", default_value="0.05"),
+        DeclareLaunchArgument("human_thigh_radius_sim", default_value="0.08"),
+        DeclareLaunchArgument("human_shin_radius_sim", default_value="0.07"),
+        DeclareLaunchArgument("human_head_radius_sim", default_value="0.10"),
 
         # ---------------- shared ZED skeleton points pre-processor ----------------
         Node(
@@ -285,13 +285,13 @@ def generate_launch_description():
                 "marker_topic": "/real/human_capsules_markers_robot",
                 "target_frame": "pelvis",
 
-                "extrinsic_tx": 2.155132030254977,
-                "extrinsic_ty": 0.2126549700677248,
-                "extrinsic_tz": -0.16733448394805378,
-                "extrinsic_qx": 0.11707934250730477,
-                "extrinsic_qy": 0.03377182306070312,
-                "extrinsic_qz": 0.992493225367401,
-                "extrinsic_qw": 0.010444573951437231,
+                "extrinsic_tx": 2.2074697793823734,
+                "extrinsic_ty": 0.15829853965578777,
+                "extrinsic_tz": -0.35910314253838943,
+                "extrinsic_qx": 0.16395790764865018,
+                "extrinsic_qy": -0.016102723061442434,
+                "extrinsic_qz": 0.9854584606546898,
+                "extrinsic_qw": 0.04159482123501162,
                 # "extrinsic_qx": 0.0,
                 # "extrinsic_qy": 0.0,
                 # "extrinsic_qz": 1.0,
@@ -346,6 +346,7 @@ def generate_launch_description():
                 "joint_state_topic": sim_joint_state_topic,
                 "debug_log": False,
                 "debug_log_period_sec": 1.0,
+                "show_viewer": False,
             }],
         ),
 
@@ -432,6 +433,7 @@ def generate_launch_description():
                 "joint_state_topic": sim_joint_state_topic,
                 "debug_log": False,
                 "debug_log_period_sec": 1.0,
+                "show_viewer": False,
             }],
         ),
 
