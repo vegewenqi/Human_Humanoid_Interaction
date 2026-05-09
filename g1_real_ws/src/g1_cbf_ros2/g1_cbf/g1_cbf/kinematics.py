@@ -82,8 +82,8 @@ COLLISION_PAIRS = [
     ('left_arm', 'torso'),
     ('right_arm', 'torso'),
     ('left_arm', 'left_thigh'),
-    ('left_arm', 'right_thigh'),
-    ('right_arm', 'left_thigh'),
+    # ('left_arm', 'right_thigh'),
+    # ('right_arm', 'left_thigh'),
     ('right_arm', 'right_thigh'),
 ]
 
