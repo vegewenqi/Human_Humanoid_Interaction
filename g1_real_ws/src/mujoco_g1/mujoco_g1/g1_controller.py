@@ -84,6 +84,11 @@ class G1ActuatorController(Node):
 
         self.declare_parameter("apply_q_home_on_start", True)
 
+        self.declare_parameter("debug_log", False)
+        self.declare_parameter("debug_log_period_sec", 1.0)
+        self.debug_log = bool(self.get_parameter("debug_log").value)
+        self.debug_log_period_sec = float(self.get_parameter("debug_log_period_sec").value)
+
         # ---------------- read params ----------------
         self.mjcf_path = str(self.get_parameter("mjcf_path").value)
         if not self.mjcf_path:
@@ -367,29 +372,35 @@ class G1ActuatorController(Node):
         if now - self.last_log_t > 1.0:
             if self.log_output in ["qdes", "both"]:
                 qd_deg = np.rad2deg(self.q_cmd)
-                self.get_logger().info(
-                    "[q_des_cmd_deg] "
-                    f"waist_roll={qd_deg[0]:.2f}, waist_pitch={qd_deg[1]:.2f}, "
-                    f"l_sh_pitch={qd_deg[2]:.2f}, l_sh_roll={qd_deg[3]:.2f}, l_elbow={qd_deg[4]:.2f}, "
-                    f"r_sh_pitch={qd_deg[5]:.2f}, r_sh_roll={qd_deg[6]:.2f}, r_elbow={qd_deg[7]:.2f}"
-                )
+                if self.debug_log:
+                    self.get_logger().info(
+                        "[q_des_cmd_deg] "
+                        f"waist_roll={qd_deg[0]:.2f}, waist_pitch={qd_deg[1]:.2f}, "
+                        f"l_sh_pitch={qd_deg[2]:.2f}, l_sh_roll={qd_deg[3]:.2f}, l_elbow={qd_deg[4]:.2f}, "
+                        f"r_sh_pitch={qd_deg[5]:.2f}, r_sh_roll={qd_deg[6]:.2f}, r_elbow={qd_deg[7]:.2f}",
+                        throttle_duration_sec=self.debug_log_period_sec,
+                    )
 
             if self.log_output in ["q", "both"]:
                 q_deg = np.rad2deg(self.data.qpos[self.qpos_ids])
-                self.get_logger().info(
-                    "[q_now_deg] "
+                if self.debug_log:
+                    self.get_logger().info(
+                        "[q_now_deg] "
                     f"waist_roll={q_deg[0]:.2f}, waist_pitch={q_deg[1]:.2f}, "
                     f"l_sh_pitch={q_deg[2]:.2f}, l_sh_roll={q_deg[3]:.2f}, l_elbow={q_deg[4]:.2f}, "
-                    f"r_sh_pitch={q_deg[5]:.2f}, r_sh_roll={q_deg[6]:.2f}, r_elbow={q_deg[7]:.2f}"
+                    f"r_sh_pitch={q_deg[5]:.2f}, r_sh_roll={q_deg[6]:.2f}, r_elbow={q_deg[7]:.2f}",
+                    throttle_duration_sec=self.debug_log_period_sec,
                 )
 
             if self.log_output in ["ctrl", "both"]:
                 c_deg = np.rad2deg(self.data.ctrl[self.actuator_ids])
-                self.get_logger().info(
-                    "[ctrl_position_deg] "
+                if self.debug_log:
+                    self.get_logger().info(
+                        "[ctrl_position_deg] "
                     f"waist_roll={c_deg[0]:.2f}, waist_pitch={c_deg[1]:.2f}, "
                     f"l_sh_pitch={c_deg[2]:.2f}, l_sh_roll={c_deg[3]:.2f}, l_elbow={c_deg[4]:.2f}, "
-                    f"r_sh_pitch={c_deg[5]:.2f}, r_sh_roll={c_deg[6]:.2f}, r_elbow={c_deg[7]:.2f}"
+                    f"r_sh_pitch={c_deg[5]:.2f}, r_sh_roll={c_deg[6]:.2f}, r_elbow={c_deg[7]:.2f}",
+                    throttle_duration_sec=self.debug_log_period_sec,
                 )
 
             self.last_log_t = now

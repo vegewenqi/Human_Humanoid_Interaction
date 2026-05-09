@@ -344,6 +344,8 @@ def generate_launch_description():
                 "mjcf_path": mjcf_path,
                 "qdes_topic": qdes_nominal_topic,
                 "joint_state_topic": sim_joint_state_topic,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
@@ -428,6 +430,8 @@ def generate_launch_description():
                 "mjcf_path": mjcf_path,
                 "qdes_topic": sim_safe_qdes_topic,
                 "joint_state_topic": sim_joint_state_topic,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
