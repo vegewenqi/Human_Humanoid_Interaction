@@ -49,6 +49,9 @@ class G1ActuatorController(Node):
         # fix root/base in simulation
         self.declare_parameter("lock_base", True)
 
+        # show MuJoCo viewer window
+        self.declare_parameter("show_viewer", True)
+
         # joint names = actuator names in your XML
         self.declare_parameter(
             "joint_names",
@@ -107,6 +110,7 @@ class G1ActuatorController(Node):
         self.max_rate_rad = np.deg2rad(self.max_rate_deg)
 
         self.lock_base = bool(self.get_parameter("lock_base").value)
+        self.show_viewer = bool(self.get_parameter("show_viewer").value)
 
         self.joint_names: List[str] = list(self.get_parameter("joint_names").value)
         self.q_home = np.array(self.get_parameter("q_home").value, dtype=np.float64)
@@ -143,8 +147,12 @@ class G1ActuatorController(Node):
 
         self.model.opt.timestep = self.sim_dt
 
-        self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-        self.get_logger().info("MuJoCo viewer launched (passive).")
+        self.viewer = None
+        if self.show_viewer:
+            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            self.get_logger().info("MuJoCo viewer launched (passive).")
+        else:
+            self.get_logger().info("MuJoCo viewer disabled by show_viewer parameter.")
 
         # detect floating base
         self.has_free_root = self._detect_free_root()
@@ -258,7 +266,8 @@ class G1ActuatorController(Node):
 
         self.get_logger().info(
             f"Started G1ActuatorController: qdes_topic={self.qdes_topic}, "
-            f"ctrl_dt={self.ctrl_dt:.4f}, sim_dt={self.sim_dt:.4f}, lock_base={self.lock_base}"
+            f"ctrl_dt={self.ctrl_dt:.4f}, sim_dt={self.sim_dt:.4f}, "
+            f"lock_base={self.lock_base}, show_viewer={self.show_viewer}"
         )
 
     def _detect_free_root(self) -> bool:
@@ -364,7 +373,7 @@ class G1ActuatorController(Node):
         # publish JointState for CBF node
         self._publish_joint_states()
 
-        if self.viewer.is_running():
+        if self.viewer is not None and self.viewer.is_running():
             self.viewer.sync()
 
         # logging
@@ -411,7 +420,7 @@ class G1ActuatorController(Node):
         self._apply_base_lock()
         mujoco.mj_forward(self.model, self.data)
         self._publish_joint_states()
-        if self.viewer.is_running():
+        if self.viewer is not None and self.viewer.is_running():
             self.viewer.sync()
 
 
