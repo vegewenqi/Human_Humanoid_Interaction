@@ -58,6 +58,7 @@ int main(int argc, char **argv)
 
     PositionalTrackingParameters positional_tracking_parameters;
     positional_tracking_parameters.set_as_static = true;
+    positional_tracking_parameters.set_floor_as_origin = true;
 
     returned_state = zed.enablePositionalTracking(positional_tracking_parameters);
     if (returned_state != ERROR_CODE::SUCCESS)
