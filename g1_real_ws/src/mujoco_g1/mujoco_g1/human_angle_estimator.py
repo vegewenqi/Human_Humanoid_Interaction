@@ -55,6 +55,7 @@ class HumanAngleEstimatorNode(Node):
                 f"Invalid log_output='{self.log_output}', fallback to 'both'."
             )
             self.log_output = "both"
+
         if self.startup_delay_sec < 0.0:
             self.get_logger().warn(
                 f"startup_delay_sec={self.startup_delay_sec} invalid, reset to 5.0"
@@ -62,10 +63,12 @@ class HumanAngleEstimatorNode(Node):
             self.startup_delay_sec = 5.0
 
         self.core = HumanAngleEstimatorCore()
+
+        # dt here is only fallback. Real dt is computed dynamically in on_points().
         self.af = AngleFilter(
             alpha=float(self.get_parameter("angle_ema_alpha").value),
             max_rate_deg=float(self.get_parameter("angle_max_rate_deg").value),
-            dt=1.0 / 30.0,
+            dt=1.0 / 20.0,
         )
 
         self.latest_conf: Optional[int] = None
@@ -93,6 +96,9 @@ class HumanAngleEstimatorNode(Node):
         )
 
         self.last_log_t = time.time()
+
+        # Dynamic dt state for angle filter.
+        self.last_angle_filter_t: Optional[float] = None
 
         # neutral calibration state
         self.calib_start_t: Optional[float] = None
@@ -143,6 +149,28 @@ class HumanAngleEstimatorNode(Node):
             f"r_sh_pitch={data[5]:.2f}, r_sh_roll={data[6]:.2f}, r_el_pitch={data[7]:.2f}"
         )
 
+    def _compute_angle_filter_dt(self, now: float) -> float:
+        """
+        Compute dynamic dt for angle rate limiter.
+
+        The EMA part does not use dt.
+        dt is only used by AngleFilter's rate limit part:
+            max_step = max_rate * dt
+
+        Clamp here to avoid huge jumps after pauses or extremely small dt.
+        """
+        if self.last_angle_filter_t is None:
+            dt = 1.0 / 20.0
+        else:
+            dt = now - self.last_angle_filter_t
+
+        self.last_angle_filter_t = now
+
+        # 0.001 s = 1000 Hz upper bound
+        # 0.2 s   = 5 Hz lower bound
+        dt = float(np.clip(dt, 1e-3, 0.2))
+        return dt
+
     def on_points(self, msg: Float32MultiArray):
         conf = self.latest_conf if self.latest_conf is not None else -1
         if conf >= 0 and conf < self.min_confidence:
@@ -189,11 +217,12 @@ class HumanAngleEstimatorNode(Node):
             "r_el_pitch": angles.r_el_pitch,
         }
 
-        # filtered raw angles (internal unit: rad)
-        angle_dict = self.af.update_dict(angle_dict)
-        raw_arr = self._dict_to_array(angle_dict)
-
         now = time.time()
+        angle_filter_dt = self._compute_angle_filter_dt(now)
+
+        # filtered raw angles, internal unit: rad
+        angle_dict = self.af.update_dict(angle_dict, dt=angle_filter_dt)
+        raw_arr = self._dict_to_array(angle_dict)
 
         # auto-start calibration after startup delay
         if (
@@ -256,7 +285,11 @@ class HumanAngleEstimatorNode(Node):
             unit = "deg" if self.publish_deg else "rad"
 
             if not self.calib_done:
-                if not self.calib_started and self.calib_ready_to_start_time is not None and now < self.calib_ready_to_start_time:
+                if (
+                    not self.calib_started
+                    and self.calib_ready_to_start_time is not None
+                    and now < self.calib_ready_to_start_time
+                ):
                     remain = self.calib_ready_to_start_time - now
                     self.get_logger().info(
                         f"Neutral calibration waiting startup delay... {remain:.1f}s remaining."
