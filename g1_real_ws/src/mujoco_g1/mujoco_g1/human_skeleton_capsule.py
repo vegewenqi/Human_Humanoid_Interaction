@@ -74,6 +74,10 @@ class HumanSkeletonCapsuleNode(Node):
         self.declare_parameter("shin_radius", 0.055)
         self.declare_parameter("head_radius", 0.08)
 
+        # Extend forearm capsule beyond wrist along elbow -> wrist direction.
+        # 0.16 m roughly represents hand length.
+        self.declare_parameter("hand_extension_length", 0.16)
+
         self.declare_parameter("capsule_zed_topic", "/human_capsules_zed")
         self.declare_parameter("capsule_local_topic", "/human_capsules_local")
         self.declare_parameter("pelvis_topic", "/human_pelvis_point_zed")
@@ -90,6 +94,9 @@ class HumanSkeletonCapsuleNode(Node):
         self.thigh_radius = float(self.get_parameter("thigh_radius").value)
         self.shin_radius = float(self.get_parameter("shin_radius").value)
         self.head_radius = float(self.get_parameter("head_radius").value)
+        self.hand_extension_length = float(
+            self.get_parameter("hand_extension_length").value
+        )
 
         self.capsule_zed_topic = str(self.get_parameter("capsule_zed_topic").value)
         self.capsule_local_topic = str(self.get_parameter("capsule_local_topic").value)
@@ -148,16 +155,35 @@ class HumanSkeletonCapsuleNode(Node):
         self.get_logger().info(f"capsule_local_topic  = {self.capsule_local_topic}")
         self.get_logger().info(f"pelvis_topic         = {self.pelvis_topic}")
         self.get_logger().info(f"upper_body_anchor_topic = {self.upper_body_anchor_topic}")
+        self.get_logger().info(f"hand_extension_length = {self.hand_extension_length:.3f} m")
 
     def on_conf(self, msg: UInt8):
         self.latest_conf = int(msg.data)
 
-    def _arm_distal_point(self, wrist: np.ndarray, tip: np.ndarray) -> Optional[np.ndarray]:
-        if is_valid_point(tip):
-            return tip
-        if is_valid_point(wrist):
-            return wrist
-        return None
+    def _arm_distal_point(
+        self,
+        elbow: np.ndarray,
+        wrist: np.ndarray,
+    ) -> Optional[np.ndarray]:
+        """
+        Return a stable forearm/hand distal point.
+
+        Do NOT use middle_tip because it is usually noisier.
+        Instead, extend from wrist along elbow -> wrist direction by
+        hand_extension_length.
+        """
+        if not is_valid_point(wrist):
+            return None
+
+        if is_valid_point(elbow):
+            direction = wrist - elbow
+            norm = float(np.linalg.norm(direction))
+
+            if np.isfinite(norm) and norm > 1e-6:
+                direction = direction / norm
+                return wrist + self.hand_extension_length * direction
+
+        return wrist
 
     def _estimate_head_sphere(
         self, pts: Dict[str, Optional[np.ndarray]]
@@ -224,10 +250,12 @@ class HumanSkeletonCapsuleNode(Node):
         r_el = pts.get("right_elbow")
         l_wr = pts.get("left_wrist")
         r_wr = pts.get("right_wrist")
-        l_tip = pts.get("left_middle_tip")
-        r_tip = pts.get("right_middle_tip")
-        l_hand = self._arm_distal_point(l_wr, l_tip)
-        r_hand = self._arm_distal_point(r_wr, r_tip)
+
+        # Middle-tip points are intentionally not used for forearm/hand capsules,
+        # because they are typically noisier. The hand part is approximated by
+        # extending from wrist along elbow -> wrist direction.
+        l_hand = self._arm_distal_point(l_el, l_wr)
+        r_hand = self._arm_distal_point(r_el, r_wr)
 
         l_hip = pts.get("left_hip")
         r_hip = pts.get("right_hip")
