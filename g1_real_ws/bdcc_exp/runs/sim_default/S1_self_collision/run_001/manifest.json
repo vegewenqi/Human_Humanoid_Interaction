@@ -1,0 +1,37 @@
+{
+  "run_id": "run_001",
+  "scenario_id": "S1_self_collision",
+  "platform": "sim",
+  "mode": "cbf",
+  "outdir": "/ws/bdcc_exp/runs/sim_default/S1_self_collision/run_001",
+  "duration_sec": 55.0,
+  "created_unix_time": 1778497422.6797853,
+  "topics": {
+    "q_nom": "/joint_commands_unsafe",
+    "q_cbf": "/sim/joint_commands",
+    "q_act": "/sim/joint_states",
+    "skeleton_filtered": "/skeleton/points_filtered",
+    "confidence": "/skeleton/confidence",
+    "human_capsules_robot": "/sim/human_capsules_robot",
+    "cbf_diagnostics": "/sim/cbf/diagnostics",
+    "cbf_min_control_pair": "/sim/cbf/min_control_pair"
+  },
+  "parameters": {
+    "rr_safety_distance": 0.03,
+    "hr_safety_distance": NaN,
+    "rr_gamma": 2.0,
+    "hr_gamma": NaN,
+    "lpf_gain": 1.0
+  },
+  "counts": {
+    "q_nom": 1423,
+    "q_cbf": 1210,
+    "q_act": 3306,
+    "skeleton_filtered": 1426,
+    "confidence": 1426,
+    "human_capsules_robot": 1426,
+    "cbf_diagnostics": 1210,
+    "cbf_min_control_pair": 1210
+  },
+  "notes": ""
+}

@@ -140,4 +140,14 @@ python3 /ws/bdcc_exp/scripts/offline/offline_compute_metrics.py \
   --mode self_collision \
   --sample-rate-hz 50 \
   --max-lag-sec 2.0 \
-  --lag-step-sec 0.02
+  --lag-step-sec 0.02 \
+  --eval-start-sec 8.0 \
+  --eval-end-sec 50.0
+
+
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/plot/plot_sim_self_collision.py \
+  --run-dir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/sim_default/S1_self_collision/run_001 \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sim_default/S1_self_collision \
+  --smooth-window 3 \
+  --angle-unit deg \
+  --formats svg png
