@@ -173,8 +173,8 @@ def generate_launch_description():
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
         # CBF sweep parameters. Defaults preserve the previous sim/real values.
-        DeclareLaunchArgument("sim_rr_safety_distance", default_value="0.05"),
-        DeclareLaunchArgument("sim_hr_safety_distance", default_value="0.15"),
+        DeclareLaunchArgument("sim_rr_safety_distance", default_value="0.03"),
+        DeclareLaunchArgument("sim_hr_safety_distance", default_value="0.10"),
         DeclareLaunchArgument("sim_rr_gamma", default_value="2.0"),
         DeclareLaunchArgument("sim_hr_gamma", default_value="2.0"),
         
@@ -259,13 +259,14 @@ def generate_launch_description():
                 "output_topic": sim_human_capsule_topic,
                 "marker_topic": "/sim/human_capsules_markers_robot",
                 "target_frame": "pelvis",
+                # "enable_footprint_marker": False,
 
                 "align_roll_deg": 0.0,
                 "align_pitch_deg": 0.0,
                 "align_yaw_deg": 180.0,
 
                 "tx": 0.0,
-                "ty": 0.72,
+                "ty": 0.80,
                 "tz": 0.0,
                 "yaw_deg": 0.0,
             }],

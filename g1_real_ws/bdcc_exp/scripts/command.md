@@ -151,3 +151,54 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --smooth-window 3 \
   --angle-unit deg \
   --formats svg png
+
+
+==============================================================================================
+### 实验section1 sim
+### human-robot
+## 参数： 
+sim_hr_safety_distance=0.10
+sim_hr_gamma=2.0
+enable_self_collision: False
+enable_human_collision: True
+y_distance: 0.80
+
+ros2 launch mujoco_g1 bdcc_unified_pipeline.launch.py run_sim:=true run_real:=false use_cbf:=true
+
+python3 /ws/bdcc_exp/scripts/replay/replay_skeleton_segment.py \
+  --segment /ws/bdcc_exp/segments/S2_human_robot_2 \
+  --publish-mode filtered \
+  --start-delay 3.0 \
+  --replay-rate-hz 60 \
+  --time-scale 1.0
+
+python3 /ws/bdcc_exp/scripts/log/trial_topic_logger.py \
+  --platform sim \
+  --scenario S2_human_robot_2 \
+  --mode cbf \
+  --run-id run_001 \
+  --outdir /ws/bdcc_exp/runs/sim_default/S2_human_robot_2/run_001 \
+  --duration 70 \
+  --record-q-act \
+  --record-cbf-diagnostics \
+  --hr-safety-distance 0.10 \
+  --hr-gamma 2.0
+
+
+python3 /ws/bdcc_exp/scripts/offline/offline_compute_metrics.py \
+  --run-dir /ws/bdcc_exp/runs/sim_default/S2_human_robot_2/run_001 \
+  --urdf-path /ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf \
+  --mode human_robot \
+  --sample-rate-hz 50 \
+  --max-lag-sec 2.0 \
+  --lag-step-sec 0.02 \
+  --eval-start-sec 10.0 \
+  --eval-end-sec 62.0
+
+
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/plot/plot_sim_human_robot.py \
+  --run-dir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/sim_default/S2_human_robot_2/run_001 \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sim_default/S2_human_robot_2 \
+  --smooth-window 3 \
+  --angle-unit deg \
+  --formats svg png

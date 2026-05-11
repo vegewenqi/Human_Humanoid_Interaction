@@ -1,0 +1,40 @@
+run_id: run_001
+scenario_id: S2_human_robot_2
+platform: sim
+mode: cbf
+duration_sec: 70.000000
+created_unix_time: 1778509750.666248
+created_readable_time: "2026-05-11 14:29:10"
+
+topics:
+  q_nom: /joint_commands_unsafe
+  q_cbf: /sim/joint_commands
+  q_act: /sim/joint_states
+  skeleton_filtered: /skeleton/points_filtered
+  confidence: /skeleton/confidence
+  human_capsules_robot: /sim/human_capsules_robot
+  cbf_diagnostics: /sim/cbf/diagnostics
+  cbf_min_control_pair: /sim/cbf/min_control_pair
+
+parameters:
+  rr_safety_distance: nan
+  hr_safety_distance: 0.1
+  rr_gamma: nan
+  hr_gamma: 2.0
+  lpf_gain: 1.0
+
+flags:
+  record_q_act: true
+  record_cbf_diagnostics: true
+
+counts:
+  q_nom_frames: 1876
+  q_cbf_frames: 1372
+  q_act_frames: 4206
+  skeleton_filtered_frames: 1876
+  confidence_frames: 1876
+  human_capsules_robot_frames: 1876
+  cbf_diagnostics_frames: 1372
+  cbf_min_control_pair_frames: 1372
+
+notes: ""
