@@ -643,7 +643,6 @@ def compute_link_ndtw(
             "dtw_lag_min_sec": math.nan,
             "dtw_lag_max_sec": math.nan,
             "dtw_lag_abs_mean_sec": math.nan,
-            "dtw_best_lag_sec": math.nan,
             "global_best_lag_sec": math.nan,
             "global_best_lag_cost_rad": math.nan,
             "dtw_num_human_frames": len(h_times),
@@ -691,6 +690,7 @@ def compute_link_ndtw(
 
     return {
         "ndtw_link_rad": ndtw,
+        "ndtw_link_rad_mean": ndtw/4 if np.isfinite(ndtw) else math.nan,
         "dtw_total_cost": float(total),
         "dtw_path_length": int(len(path)),
         "dtw_lag_mean_sec": float(np.mean(lags)) if len(lags) > 0 else math.nan,
@@ -698,7 +698,6 @@ def compute_link_ndtw(
         "dtw_lag_min_sec": float(np.min(lags)) if len(lags) > 0 else math.nan,
         "dtw_lag_max_sec": float(np.max(lags)) if len(lags) > 0 else math.nan,
         "dtw_lag_abs_mean_sec": float(np.mean(np.abs(lags))) if len(lags) > 0 else math.nan,
-        "dtw_best_lag_sec": float(np.median(lags)) if len(lags) > 0 else math.nan,
         "global_best_lag_sec": global_lag["global_best_lag_sec"],
         "global_best_lag_cost_rad": global_lag["global_best_lag_cost_rad"],
         "dtw_num_human_frames": int(n),
@@ -795,6 +794,12 @@ def main():
     parser.add_argument("--max-lag-sec", type=float, default=1.0)
     parser.add_argument("--lag-step-sec", type=float, default=0.02)
 
+    # Evaluation window in the common resampled time base.
+    # Use this to remove startup / synchronization transients from both
+    # metrics and plotted time-series outputs.
+    parser.add_argument("--eval-start-sec", type=float)
+    parser.add_argument("--eval-end-sec", type=float)
+
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir).expanduser().resolve()
@@ -836,6 +841,22 @@ def main():
 
     t = make_common_time(time_arrays, args.sample_rate_hz)
 
+    # Apply evaluation window before interpolation/metric computation so that
+    # summary metrics and exported time-series are computed over exactly the
+    # same interval. Times are relative to the logger/replay time base.
+    eval_start = float(args.eval_start_sec) if args.eval_start_sec is not None else float(t[0])
+    eval_end = float(args.eval_end_sec) if args.eval_end_sec is not None else float(t[-1])
+    if eval_end <= eval_start:
+        raise ValueError(f"Invalid evaluation window: [{eval_start}, {eval_end}]")
+
+    mask = (t >= eval_start) & (t <= eval_end)
+    if not np.any(mask):
+        raise ValueError(
+            f"No samples inside evaluation window [{eval_start}, {eval_end}]. "
+            f"Available common time range is [{float(t[0])}, {float(t[-1])}]."
+        )
+    t = t[mask]
+
     q_nom = interpolate_matrix(q_nom_t_raw, q_nom_raw, t)
     q_cbf = interpolate_matrix(q_cbf_t_raw, q_cbf_raw, t)
     skeleton = interpolate_matrix(skeleton_t_raw, skeleton_raw, t)
@@ -857,6 +878,10 @@ def main():
         "num_samples": int(len(t)),
         "sample_rate_hz": float(args.sample_rate_hz),
         "duration_sec": float(t[-1] - t[0]) if len(t) > 1 else 0.0,
+        "eval_start_sec": float(t[0]) if len(t) > 0 else math.nan,
+        "eval_end_sec": float(t[-1]) if len(t) > 0 else math.nan,
+        "eval_requested_start_sec": eval_start,
+        "eval_requested_end_sec": eval_end,
         "rmse_q0_rad": rmse_q0,
         "mean_correction_norm_rad": float(np.mean(correction_norm)),
         "max_correction_norm_rad": float(np.max(correction_norm)),
@@ -1009,6 +1034,7 @@ def main():
     print(f"Out dir:  {outdir}")
     print(f"Mode:     {args.mode}")
     print(f"Samples:  {len(t)}")
+    print(f"Eval window: [{summary['eval_start_sec']:.3f}, {summary['eval_end_sec']:.3f}] s")
     print(f"RMSE_q0:  {summary['rmse_q0_rad']:.6f} rad")
     print("")
 
@@ -1035,8 +1061,10 @@ def main():
     print("nDTW-link:")
     print(f"  unsafe_ndtw_link_rad       = {summary['unsafe_ndtw_link_rad']:.6f}")
     print(f"  safe_ndtw_link_rad         = {summary['safe_ndtw_link_rad']:.6f}")
-    print(f"  unsafe_dtw_best_lag_sec    = {summary['unsafe_dtw_best_lag_sec']:.6f}")
-    print(f"  safe_dtw_best_lag_sec      = {summary['safe_dtw_best_lag_sec']:.6f}")
+    print(f"  unsafe_ndtw_link_rad_mean  = {summary['unsafe_ndtw_link_rad_mean']:.6f}")
+    print(f"  safe_ndtw_link_rad_mean    = {summary['safe_ndtw_link_rad_mean']:.6f}")
+    print(f"  unsafe_dtw_lag_median_sec    = {summary['unsafe_dtw_lag_median_sec']:.6f}")
+    print(f"  safe_dtw_lag_median_sec      = {summary['safe_dtw_lag_median_sec']:.6f}")
     print(f"  unsafe_global_best_lag_sec = {summary['unsafe_global_best_lag_sec']:.6f}")
     print(f"  safe_global_best_lag_sec   = {summary['safe_global_best_lag_sec']:.6f}")
     print("")

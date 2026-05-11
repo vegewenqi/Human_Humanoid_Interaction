@@ -400,6 +400,8 @@ def generate_launch_description():
                     "hr_gamma": sim_hr_gamma,
 
                     # "use_gpu": True,
+                    "enable_self_collision": True,
+                    "enable_human_collision": True,
 
                     "enable_robot_caps_viz": True,
                     "enable_distance_viz": True,
@@ -606,6 +608,8 @@ def generate_launch_description():
                     "hr_gamma": real_hr_gamma,
 
                     # "use_gpu": True,
+                    "enable_self_collision": True,
+                    "enable_human_collision": True,
 
                     "enable_robot_caps_viz": True,
                     "enable_distance_viz": True,
