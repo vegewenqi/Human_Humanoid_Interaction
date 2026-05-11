@@ -1,0 +1,59 @@
+scenario_id: S2_human_robot
+recording_platform: real
+recording_mode: cbf_enabled
+duration_sec: 60.000000
+created_unix_time: 1778411312.157150
+created_readable_time: "2026-05-10 11:08:32"
+
+source_topics:
+  skeleton_raw: /skeleton/points
+  skeleton_filtered: /skeleton/points_filtered
+  confidence: /skeleton/confidence
+
+diagnostic_topics:
+  enabled: true
+  q_nom: /joint_commands_unsafe
+  q_cbf: /real/joint_commands
+  q_act: /real/joint_states
+  human_capsules_robot: /real/human_capsules_robot
+  cbf_diagnostics: /real/cbf/diagnostics
+  cbf_min_control_pair: /real/cbf/min_control_pair
+
+calibration:
+  frame_source: zed_world
+  target_frame: pelvis
+  extrinsic_tx: 2.155132030254977
+  extrinsic_ty: 0.2126549700677248
+  extrinsic_tz: -0.16733448394805378
+  extrinsic_qx: 0.11707934250730477
+  extrinsic_qy: 0.03377182306070312
+  extrinsic_qz: 0.992493225367401
+  extrinsic_qw: 0.010444573951437231
+
+human_capsule_radius_real:
+  torso_radius: 0.15
+  upper_arm_radius: 0.09
+  forearm_radius: 0.1
+  thigh_radius: 0.08
+  shin_radius: 0.07
+  head_radius: 0.08
+
+cbf_default:
+  rr_safety_distance: 0.015
+  hr_safety_distance: 0.1
+  rr_gamma: 2.0
+  hr_gamma: 4.0
+  lpf_gain: 1.0
+
+counts:
+  raw_skeleton_frames: 0
+  filtered_skeleton_frames: 1615
+  confidence_frames: 1615
+  q_nom_frames: 1615
+  q_cbf_frames: 474
+  q_act_frames: 10078
+  human_capsules_robot_frames: 1565
+  cbf_diagnostics_frames: 474
+  cbf_min_control_pair_frames: 474
+
+notes: "Real robot CBF-enabled recording for human-robot collision segment."
