@@ -22,6 +22,7 @@ JOINT_LABELS = {
 
 DEFAULT_JOINTS = [
     "waist_roll_joint",
+    # "waist_pitch_joint",
     "left_shoulder_pitch_joint",
     "left_shoulder_roll_joint",
     "left_elbow_joint",
@@ -267,7 +268,7 @@ def plot_main(
 
     outdir.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
-        out = outdir / f"fig_sim_human_robot_main.{fmt}"
+        out = outdir / f"fig_real_human_robot_main.{fmt}"
         fig.savefig(out, dpi=300, bbox_inches="tight")
         print(f"Saved: {out}")
 
@@ -350,7 +351,7 @@ def plot_pairs(run_dir: Path, outdir: Path, t_start, t_end, smooth_window, top_k
 
     outdir.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
-        out = outdir / f"fig_sim_human_robot_pairs.{fmt}"
+        out = outdir / f"fig_real_human_robot_pairs.{fmt}"
         fig.savefig(out, dpi=300, bbox_inches="tight")
         print(f"Saved: {out}")
 

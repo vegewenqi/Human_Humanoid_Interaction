@@ -785,7 +785,7 @@ def main():
 
     parser.add_argument(
         "--mode",
-        choices=["self_collision", "human_robot", "both"],
+        choices=["self_collision", "human_robot", "both", "merge"],
         default="both",
     )
     parser.add_argument("--sample-rate-hz", type=float, default=50.0)
@@ -820,7 +820,7 @@ def main():
 
     time_arrays = [q_nom_t_raw, q_cbf_t_raw]
 
-    need_hr = args.mode in ["human_robot", "both"]
+    need_hr = args.mode in ["human_robot", "both", "merge"]
 
     if need_hr:
         if "human_capsules_robot_t" not in data.files or "human_capsules_robot_data" not in data.files:
@@ -887,7 +887,7 @@ def main():
         "max_correction_norm_rad": float(np.max(correction_norm)),
     }
 
-    if args.mode in ["self_collision", "both"]:
+    if args.mode in ["self_collision", "both", "merge"]:
         pairs = list(COLLISION_PAIRS)
         pair_tags = [f"{a}__{b}" for a, b in pairs]
 
@@ -930,7 +930,7 @@ def main():
         summary["self_delta_M_ctr"] = summary["self_safe_M_ctr"] - summary["self_unsafe_M_ctr"]
         summary["self_delta_M_cc"] = summary["self_safe_M_cc"] - summary["self_unsafe_M_cc"]
 
-    if args.mode in ["human_robot", "both"]:
+    if args.mode in ["human_robot", "both", "merge"]:
         pairs = list(ROBOT_HUMAN_COLLISION_PAIRS)
         pair_tags = [f"{a}__{b}" for a, b in pairs]
 
@@ -976,6 +976,67 @@ def main():
         summary["hr_delta_M_clear_m"] = summary["hr_safe_M_clear_m"] - summary["hr_unsafe_M_clear_m"]
         summary["hr_delta_M_ctr"] = summary["hr_safe_M_ctr"] - summary["hr_unsafe_M_ctr"]
         summary["hr_delta_M_cc"] = summary["hr_safe_M_cc"] - summary["hr_unsafe_M_cc"]
+
+    # Merged safety metrics over all monitored pairs.
+    # This treats robot-robot and human-robot clearances as one joint safety set:
+    #   m_merge(t) = min( min_i m_self_i(t), min_j m_hr_j(t) ).
+    # No weighting is applied here. Weighted composite scores for sweeps can be
+    # constructed later from the separately exported self/hr/merge summaries.
+    if args.mode in ["merge", "both"]:
+        merge_available = []
+        if "self_unsafe_global_min_clearance" in series and "self_safe_global_min_clearance" in series:
+            merge_available.append("self")
+        if "hr_unsafe_global_min_clearance" in series and "hr_safe_global_min_clearance" in series:
+            merge_available.append("hr")
+
+        if not merge_available:
+            raise RuntimeError("Merge mode requires at least one safety family to be computed.")
+
+        unsafe_arrays = []
+        safe_arrays = []
+        if "self" in merge_available:
+            unsafe_arrays.append(np.asarray(series["self_unsafe_global_min_clearance"], dtype=np.float64))
+            safe_arrays.append(np.asarray(series["self_safe_global_min_clearance"], dtype=np.float64))
+        if "hr" in merge_available:
+            unsafe_arrays.append(np.asarray(series["hr_unsafe_global_min_clearance"], dtype=np.float64))
+            safe_arrays.append(np.asarray(series["hr_safe_global_min_clearance"], dtype=np.float64))
+
+        merge_unsafe_global_min = np.nanmin(np.vstack(unsafe_arrays), axis=0)
+        merge_safe_global_min = np.nanmin(np.vstack(safe_arrays), axis=0)
+
+        merge_unsafe_pair = []
+        merge_safe_pair = []
+        for k in range(len(t)):
+            # Unsafe pair label.
+            cand = []
+            if "self" in merge_available:
+                cand.append((series["self_unsafe_global_min_clearance"][k], "self:" + str(series["self_unsafe_global_min_pair"][k])))
+            if "hr" in merge_available:
+                cand.append((series["hr_unsafe_global_min_clearance"][k], "hr:" + str(series["hr_unsafe_global_min_pair"][k])))
+            cand = [(v, name) for v, name in cand if np.isfinite(v)]
+            merge_unsafe_pair.append(min(cand, key=lambda x: x[0])[1] if cand else "")
+
+            # Safe pair label.
+            cand = []
+            if "self" in merge_available:
+                cand.append((series["self_safe_global_min_clearance"][k], "self:" + str(series["self_safe_global_min_pair"][k])))
+            if "hr" in merge_available:
+                cand.append((series["hr_safe_global_min_clearance"][k], "hr:" + str(series["hr_safe_global_min_pair"][k])))
+            cand = [(v, name) for v, name in cand if np.isfinite(v)]
+            merge_safe_pair.append(min(cand, key=lambda x: x[0])[1] if cand else "")
+
+        series["merge_unsafe_global_min_clearance"] = merge_unsafe_global_min
+        series["merge_safe_global_min_clearance"] = merge_safe_global_min
+        series["merge_unsafe_global_min_pair"] = merge_unsafe_pair
+        series["merge_safe_global_min_pair"] = merge_safe_pair
+
+        summary.update(safety_summary("merge_unsafe", merge_unsafe_global_min))
+        summary.update(safety_summary("merge_safe", merge_safe_global_min))
+        summary["merge_delta_M_clear_m"] = summary["merge_safe_M_clear_m"] - summary["merge_unsafe_M_clear_m"]
+        summary["merge_delta_M_ctr"] = summary["merge_safe_M_ctr"] - summary["merge_unsafe_M_ctr"]
+        summary["merge_delta_M_cc"] = summary["merge_safe_M_cc"] - summary["merge_unsafe_M_cc"]
+        summary["merge_definition"] = "minimum over all monitored self-collision and human-robot collision clearance margins"
+        summary["merge_sources"] = merge_available
 
     unsafe_dtw = compute_link_ndtw(
         kin=kin,
@@ -1038,7 +1099,7 @@ def main():
     print(f"RMSE_q0:  {summary['rmse_q0_rad']:.6f} rad")
     print("")
 
-    if args.mode in ["self_collision", "both"]:
+    if args.mode in ["self_collision", "both", "merge"]:
         print("Self-collision:")
         print(f"  unsafe M_clear = {summary['self_unsafe_M_clear_m']:.6f} m")
         print(f"  safe   M_clear = {summary['self_safe_M_clear_m']:.6f} m")
@@ -1048,7 +1109,7 @@ def main():
         print(f"  safe   M_cc    = {summary['self_safe_M_cc']}")
         print("")
 
-    if args.mode in ["human_robot", "both"]:
+    if args.mode in ["human_robot", "both", "merge"]:
         print("Human-robot:")
         print(f"  unsafe M_clear = {summary['hr_unsafe_M_clear_m']:.6f} m")
         print(f"  safe   M_clear = {summary['hr_safe_M_clear_m']:.6f} m")
@@ -1056,6 +1117,16 @@ def main():
         print(f"  safe   M_ctr   = {summary['hr_safe_M_ctr']:.6f}")
         print(f"  unsafe M_cc    = {summary['hr_unsafe_M_cc']}")
         print(f"  safe   M_cc    = {summary['hr_safe_M_cc']}")
+        print("")
+
+    if args.mode in ["merge", "both"]:
+        print("Merged safety (self + human-robot):")
+        print(f"  unsafe M_clear = {summary['merge_unsafe_M_clear_m']:.6f} m")
+        print(f"  safe   M_clear = {summary['merge_safe_M_clear_m']:.6f} m")
+        print(f"  unsafe M_ctr   = {summary['merge_unsafe_M_ctr']:.6f}")
+        print(f"  safe   M_ctr   = {summary['merge_safe_M_ctr']:.6f}")
+        print(f"  unsafe M_cc    = {summary['merge_unsafe_M_cc']}")
+        print(f"  safe   M_cc    = {summary['merge_safe_M_cc']}")
         print("")
 
     print("nDTW-link:")

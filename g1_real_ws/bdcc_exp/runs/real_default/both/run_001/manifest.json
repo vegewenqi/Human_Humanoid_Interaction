@@ -1,0 +1,37 @@
+{
+  "run_id": "run_001",
+  "scenario_id": "S2_human_robot_2",
+  "platform": "real",
+  "mode": "cbf",
+  "outdir": "/ws/bdcc_exp/runs/real_default/both/run_001",
+  "duration_sec": 70.0,
+  "created_unix_time": 1778682783.8139415,
+  "topics": {
+    "q_nom": "/joint_commands_unsafe",
+    "q_cbf": "/real/joint_commands",
+    "q_act": "/real/joint_states",
+    "skeleton_filtered": "/skeleton/points_filtered",
+    "confidence": "/skeleton/confidence",
+    "human_capsules_robot": "/real/human_capsules_robot",
+    "cbf_diagnostics": "/real/cbf/diagnostics",
+    "cbf_min_control_pair": "/real/cbf/min_control_pair"
+  },
+  "parameters": {
+    "rr_safety_distance": 0.03,
+    "hr_safety_distance": 0.15,
+    "rr_gamma": 2.0,
+    "hr_gamma": 3.0,
+    "lpf_gain": 1.0
+  },
+  "counts": {
+    "q_nom": 1873,
+    "q_cbf": 483,
+    "q_act": 11132,
+    "skeleton_filtered": 1873,
+    "confidence": 1873,
+    "human_capsules_robot": 1823,
+    "cbf_diagnostics": 483,
+    "cbf_min_control_pair": 483
+  },
+  "notes": ""
+}
