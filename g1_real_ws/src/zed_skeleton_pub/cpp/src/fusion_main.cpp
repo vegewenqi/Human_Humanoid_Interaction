@@ -32,6 +32,8 @@ static inline float dist3D(const sl::float3 &a, const sl::float3 &b);
 static inline int selectBestBodyIndex(const sl::Bodies &bodies);
 static bool hasArg(int argc, char **argv, const std::string &flag);
 static std::string getFirstNonFlagArg(int argc, char **argv);
+static inline sl::float3 transformPoint(const sl::Transform &T, const sl::float3 &p);
+static inline sl::Transform inverseRigidTransform(const sl::Transform &T);
 
 bool record_video = false;
 
@@ -177,12 +179,21 @@ int main(int argc, char **argv)
 
     if (fusion_config_path.empty()) {
         std::cerr << "Usage:\n"
-                  << "  " << argv[0] << " <zed360_calibration.json> [--show-3d] [--hide-2d] [--hide-all-viewer]\n";
+                  << "  " << argv[0] << " <zed360_calibration.json> [--show-3d] [--hide-2d] [--hide-all-viewer] [--publish-ref-zed-world]\n";
         return EXIT_FAILURE;
     }
 
     bool show_2d_viewer = true;
     bool show_3d_viewer = false;
+
+    // Default: publish fused skeleton in fusion_world.
+    // Add --publish-ref-zed-world to transform fused skeleton back to the
+    // reference ZED frame for compatibility with the old sim transform.
+    bool publish_ref_zed_world = hasArg(argc, argv, "--publish-ref-zed-world");
+
+    // Reference camera serial used as the old zed_world-compatible frame.
+    // Keep this fixed unless intentionally change the reference camera.
+    unsigned int reference_zed_serial = 41235597;
 
     if (hasArg(argc, argv, "--show-3d")) {
         show_3d_viewer = true;
@@ -220,6 +231,9 @@ int main(int argc, char **argv)
     RCLCPP_INFO(node->get_logger(), "Fusion config: %s", fusion_config_path.c_str());
     RCLCPP_INFO(node->get_logger(), "2D viewer: %s", show_2d_viewer ? "ON" : "OFF");
     RCLCPP_INFO(node->get_logger(), "3D viewer: %s", show_3d_viewer ? "ON" : "OFF");
+    RCLCPP_INFO(node->get_logger(), "Publish frame mode: %s",
+                publish_ref_zed_world ? "fusion_in_zed_world" : "fusion_world");
+    RCLCPP_INFO(node->get_logger(), "Reference ZED serial: %u", reference_zed_serial);
 
     // ---------------------------------------------------------------------
     // Read ZED360 calibration / fusion configuration
@@ -241,6 +255,32 @@ int main(int argc, char **argv)
     }
 
     RCLCPP_INFO(node->get_logger(), "Loaded %zu camera configuration(s).", configurations.size());
+
+    // ---------------------------------------------------------------------
+    // Optional transform: fusion_world -> reference ZED frame
+    // ---------------------------------------------------------------------
+    sl::Transform T_ref_zed_to_fusion;
+    sl::Transform T_fusion_to_ref_zed;
+    bool found_reference_zed = false;
+
+    for (auto &conf : configurations) {
+        if (static_cast<unsigned int>(conf.serial_number) == reference_zed_serial) {
+            T_ref_zed_to_fusion = conf.pose;
+            T_fusion_to_ref_zed = inverseRigidTransform(T_ref_zed_to_fusion);
+            found_reference_zed = true;
+            break;
+        }
+    }
+
+    if (publish_ref_zed_world && !found_reference_zed) {
+        RCLCPP_ERROR(
+            node->get_logger(),
+            "Reference ZED serial %u not found in ZED360 config.",
+            reference_zed_serial
+        );
+        rclcpp::shutdown();
+        return EXIT_FAILURE;
+    }
 
     // ---------------------------------------------------------------------
     // Open all local cameras directly in this main.cpp
@@ -527,8 +567,8 @@ int main(int argc, char **argv)
                 sensor_msgs::msg::PointCloud2 cloud;
                 cloud.header.stamp = node->get_clock()->now();
 
-                // Note: now this is Fusion world, not single-camera world.
-                cloud.header.frame_id = "fusion_world";
+                // Default: fusion_world. Optional compatibility mode: reference ZED frame.
+                cloud.header.frame_id = publish_ref_zed_world ? "fusion_in_zed_world" : "fusion_world";
 
                 cloud.height = 1;
                 cloud.width = static_cast<uint32_t>(body.keypoint.size());
@@ -543,10 +583,16 @@ int main(int argc, char **argv)
                 sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
 
                 for (size_t i = 0; i < body.keypoint.size(); ++i, ++iter_x, ++iter_y, ++iter_z) {
-                    const sl::float3 &p = body.keypoint[i];
-                    *iter_x = p.x;
-                    *iter_y = p.y;
-                    *iter_z = p.z;
+                    const sl::float3 &p_fusion = body.keypoint[i];
+
+                    sl::float3 p_pub = p_fusion;
+                    if (publish_ref_zed_world) {
+                        p_pub = transformPoint(T_fusion_to_ref_zed, p_fusion);
+                    }
+
+                    *iter_x = p_pub.x;
+                    *iter_y = p_pub.y;
+                    *iter_z = p_pub.z;
                 }
 
                 pub_cloud->publish(cloud);
@@ -695,6 +741,35 @@ void print(string msg_prefix, ERROR_CODE err_code, string msg_suffix)
         cout << " | " << toString(err_code) << " : ";
 
     cout << msg_suffix << endl;
+}
+
+static inline sl::float3 transformPoint(const sl::Transform &T, const sl::float3 &p)
+{
+    sl::float3 out;
+    out.x = T(0, 0) * p.x + T(0, 1) * p.y + T(0, 2) * p.z + T(0, 3);
+    out.y = T(1, 0) * p.x + T(1, 1) * p.y + T(1, 2) * p.z + T(1, 3);
+    out.z = T(2, 0) * p.x + T(2, 1) * p.y + T(2, 2) * p.z + T(2, 3);
+    return out;
+}
+
+static inline sl::Transform inverseRigidTransform(const sl::Transform &T)
+{
+    sl::Transform inv;
+    inv.setIdentity();
+
+    // R_inv = R^T
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            inv(r, c) = T(c, r);
+        }
+    }
+
+    // t_inv = -R^T * t
+    inv(0, 3) = -(inv(0, 0) * T(0, 3) + inv(0, 1) * T(1, 3) + inv(0, 2) * T(2, 3));
+    inv(1, 3) = -(inv(1, 0) * T(0, 3) + inv(1, 1) * T(1, 3) + inv(1, 2) * T(2, 3));
+    inv(2, 3) = -(inv(2, 0) * T(0, 3) + inv(2, 1) * T(1, 3) + inv(2, 2) * T(2, 3));
+
+    return inv;
 }
 
 static inline bool valid2D(const sl::float2 &pt)
