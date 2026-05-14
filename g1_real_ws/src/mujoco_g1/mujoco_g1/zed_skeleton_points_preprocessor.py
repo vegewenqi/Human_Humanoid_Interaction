@@ -83,7 +83,12 @@ class ZedSkeletonPointsPreprocessorNode(Node):
             return
 
         pts_xyz = pts_xyz.astype(np.float64)
-        pts_xyz *= 0.001  # mm -> m
+        if msg.header.frame_id == "zed_world":
+            pts_xyz *= 0.001  # mm -> m
+        elif msg.header.frame_id == "fusion_world" or msg.header.frame_id == "fusion_in_zed_world":
+            pass  # already in meters
+        else:
+            self.get_logger().warn(f"Unknown frame_id '{msg.header.frame_id}' in PointCloud2, assuming points are in meters.")
 
         pts_filtered = np.full_like(pts_xyz, np.nan, dtype=np.float64)
 
