@@ -40,7 +40,7 @@ class G1ActuatorController(Node):
         self.declare_parameter("qdes_in_degrees", False)
 
         self.declare_parameter("sim_dt", 1.0 / 250.0)
-        self.declare_parameter("ctrl_dt", 1.0 / 60.0)
+        self.declare_parameter("ctrl_dt", 1.0 / 100.0)
 
         self.declare_parameter("log_output", "both")    # qdes | q | ctrl | both
         self.declare_parameter("ema_alpha", 0.25)
@@ -351,7 +351,7 @@ class G1ActuatorController(Node):
         q_limited = self.q_cmd + dq
 
         # EMA smoothing
-        q_next = self.ema_alpha * self.q_cmd + (1.0 - self.ema_alpha) * q_limited
+        q_next = (1.0 - self.ema_alpha) * self.q_cmd + self.ema_alpha * q_limited
 
         # final clip
         q_next = np.clip(q_next, self.q_min, self.q_max)

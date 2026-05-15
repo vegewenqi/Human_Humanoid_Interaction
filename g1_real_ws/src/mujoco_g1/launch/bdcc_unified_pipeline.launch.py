@@ -367,6 +367,8 @@ def generate_launch_description():
                 "debug_log": False,
                 "debug_log_period_sec": 1.0,
                 "show_viewer": True,
+                "ema_alpha": 1.0,
+                "max_rate_deg": 1080.0,
             }],
         ),
 
@@ -456,6 +458,8 @@ def generate_launch_description():
                 "debug_log": False,
                 "debug_log_period_sec": 1.0,
                 "show_viewer": False,
+                "ema_alpha": 1.0,
+                "max_rate_deg": 1080.0,
             }],
         ),
 
