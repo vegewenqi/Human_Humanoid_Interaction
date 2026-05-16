@@ -254,6 +254,16 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --formats svg png
 
 
+  ## 画表格
+  python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/analyze_cbf_runtime_stats.py \
+  --input /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/S1_self_collision/run_001/topics.npz \
+  --eval-start-sec 8.0 \
+  --eval-end-sec 50.0 \
+  --rr-safety-distance 0.03 \
+  --rr-gamma 2.0 \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/S1_self_collision/run_001 \
+  --prefix cbf_runtime_stats
+
 ==============================================================================================
 ### 实验section1 real
 ### human-robot
@@ -304,6 +314,17 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --smooth-window 3 \
   --angle-unit deg \
   --formats svg png
+
+
+## 画表格
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/analyze_cbf_runtime_stats.py \
+--input /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/S2_human_robot_2/run_001/topics.npz \
+--eval-start-sec 10.0 \
+--eval-end-sec 62.0 \
+--hr-safety-distance 0.15 \
+--hr-gamma 3.0 \
+--outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/S2_human_robot_2/run_001 \
+--prefix cbf_runtime_stats
 
 
 ### 实验section1 real
@@ -360,3 +381,16 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --angle-unit deg \
   --top-k-pairs 4 \
   --formats svg png
+
+
+## 画表格
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/analyze_cbf_runtime_stats.py \
+--input /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/both/run_001/topics.npz \
+--eval-start-sec 10.0 \
+--eval-end-sec 62.0 \
+--rr-safety-distance 0.03 \
+--rr-gamma 2.0 \
+--hr-safety-distance 0.15 \
+--hr-gamma 3.0 \
+--outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/both/run_001 \
+--prefix cbf_runtime_stats
