@@ -605,7 +605,7 @@ class G1CBFNode(Node):
         self.q_cbf_target += dq_safe * dt
 
         # Prevent divergence
-        max_lead = 0.5
+        max_lead = 3.0
         self.q_cbf_target = np.clip(
             self.q_cbf_target,
             q_ctrl - max_lead,
