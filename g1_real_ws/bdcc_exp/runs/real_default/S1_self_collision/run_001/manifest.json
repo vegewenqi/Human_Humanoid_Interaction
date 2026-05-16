@@ -5,7 +5,7 @@
   "mode": "cbf",
   "outdir": "/ws/bdcc_exp/runs/real_default/S1_self_collision/run_001",
   "duration_sec": 55.0,
-  "created_unix_time": 1778664751.0178707,
+  "created_unix_time": 1778928781.320155,
   "topics": {
     "q_nom": "/joint_commands_unsafe",
     "q_cbf": "/real/joint_commands",
@@ -25,13 +25,13 @@
   },
   "counts": {
     "q_nom": 1422,
-    "q_cbf": 715,
-    "q_act": 9051,
+    "q_cbf": 645,
+    "q_act": 8906,
     "skeleton_filtered": 1425,
     "confidence": 1425,
     "human_capsules_robot": 1375,
-    "cbf_diagnostics": 715,
-    "cbf_min_control_pair": 715
+    "cbf_diagnostics": 645,
+    "cbf_min_control_pair": 645
   },
   "notes": ""
 }

@@ -3,8 +3,8 @@ scenario_id: S1_self_collision
 platform: real
 mode: cbf
 duration_sec: 55.000000
-created_unix_time: 1778664751.015514
-created_readable_time: "2026-05-13 09:32:31"
+created_unix_time: 1778928781.318966
+created_readable_time: "2026-05-16 10:53:01"
 
 topics:
   q_nom: /joint_commands_unsafe
@@ -29,12 +29,12 @@ flags:
 
 counts:
   q_nom_frames: 1422
-  q_cbf_frames: 715
-  q_act_frames: 9051
+  q_cbf_frames: 645
+  q_act_frames: 8906
   skeleton_filtered_frames: 1425
   confidence_frames: 1425
   human_capsules_robot_frames: 1375
-  cbf_diagnostics_frames: 715
-  cbf_min_control_pair_frames: 715
+  cbf_diagnostics_frames: 645
+  cbf_min_control_pair_frames: 645
 
 notes: ""
