@@ -5,7 +5,7 @@
   "mode": "cbf",
   "outdir": "/ws/bdcc_exp/runs/real_default/both/run_001",
   "duration_sec": 70.0,
-  "created_unix_time": 1778682783.8139415,
+  "created_unix_time": 1778931678.515118,
   "topics": {
     "q_nom": "/joint_commands_unsafe",
     "q_cbf": "/real/joint_commands",
@@ -24,14 +24,14 @@
     "lpf_gain": 1.0
   },
   "counts": {
-    "q_nom": 1873,
-    "q_cbf": 483,
-    "q_act": 11132,
-    "skeleton_filtered": 1873,
-    "confidence": 1873,
-    "human_capsules_robot": 1823,
-    "cbf_diagnostics": 483,
-    "cbf_min_control_pair": 483
+    "q_nom": 1879,
+    "q_cbf": 528,
+    "q_act": 11405,
+    "skeleton_filtered": 1879,
+    "confidence": 1879,
+    "human_capsules_robot": 1829,
+    "cbf_diagnostics": 528,
+    "cbf_min_control_pair": 528
   },
   "notes": ""
 }

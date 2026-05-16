@@ -179,9 +179,9 @@ def generate_launch_description():
         DeclareLaunchArgument("sim_hr_gamma", default_value="2.0"),
         
         DeclareLaunchArgument("real_rr_safety_distance", default_value="0.03"),
-        DeclareLaunchArgument("real_hr_safety_distance", default_value="0.10"),
+        DeclareLaunchArgument("real_hr_safety_distance", default_value="0.15"),
         DeclareLaunchArgument("real_rr_gamma", default_value="2.0"),
-        DeclareLaunchArgument("real_hr_gamma", default_value="2.0"),
+        DeclareLaunchArgument("real_hr_gamma", default_value="3.0"),
 
         # CBF diagnostics topics. The numeric Float32MultiArray layout is documented
         # in g1_cbf_node.py; the pair topic publishes the current min-pair label.

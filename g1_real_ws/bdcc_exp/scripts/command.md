@@ -316,7 +316,7 @@ real_hr_gamma=3.0
 enable_self_collision: True
 enable_human_collision: True
 human_capsules_radius: same as sim
-y_distance: 0.82
+y_distance: 0.85
 
 ros2 launch mujoco_g1 bdcc_unified_pipeline.launch.py run_sim:=false run_real:=true use_cbf:=true
 

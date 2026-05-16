@@ -3,8 +3,8 @@ scenario_id: S2_human_robot_2
 platform: real
 mode: cbf
 duration_sec: 70.000000
-created_unix_time: 1778682783.813271
-created_readable_time: "2026-05-13 14:33:03"
+created_unix_time: 1778931678.510180
+created_readable_time: "2026-05-16 11:41:18"
 
 topics:
   q_nom: /joint_commands_unsafe
@@ -28,13 +28,13 @@ flags:
   record_cbf_diagnostics: true
 
 counts:
-  q_nom_frames: 1873
-  q_cbf_frames: 483
-  q_act_frames: 11132
-  skeleton_filtered_frames: 1873
-  confidence_frames: 1873
-  human_capsules_robot_frames: 1823
-  cbf_diagnostics_frames: 483
-  cbf_min_control_pair_frames: 483
+  q_nom_frames: 1879
+  q_cbf_frames: 528
+  q_act_frames: 11405
+  skeleton_filtered_frames: 1879
+  confidence_frames: 1879
+  human_capsules_robot_frames: 1829
+  cbf_diagnostics_frames: 528
+  cbf_min_control_pair_frames: 528
 
 notes: ""
