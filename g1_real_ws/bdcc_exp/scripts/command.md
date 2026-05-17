@@ -394,3 +394,54 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
 --hr-gamma 3.0 \
 --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/runs/real_default/both/run_001 \
 --prefix cbf_runtime_stats
+
+
+==========================================================================================
+## 实验section2 real
+## phi_grid parameter sweep
+## launch参数：
+enable_self_collision: True
+enable_human_collision: True
+human_capsules_radius: same as sim
+"extrinsic_ty": 0.95,
+CBF "max_velocity": 1.0,
+g1 "max_velocity": 1.0,
+
+PHI_RR_VALUES = [0.005, 0.01, 0.02, 0.03, 0.04]
+PHI_HR_VALUES = [0.09, 0.12, 0.15, 0.17, 0.19]
+GAMMA_RR_VALUES = 2.0
+GAMMA_HR_VALUES = 3.0
+
+SCRIPT_ROOT=/ws/bdcc_exp/scripts/sweep
+python3 $SCRIPT_ROOT/run_parameter_sweep.py \
+  --platform real \
+  --sweep-type phi_grid \
+  --out-root /ws/bdcc_exp/sweeps/real_merge_phi_grid \
+  --repeats 3 \
+  --launch-wait-sec 3 \
+  --shutdown-wait-sec 10 \
+  --duration 70 \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --rviz true
+
+
+python3 /ws/bdcc_exp/scripts/sweep/aggregate_sweep_results.py \
+  --sweep-root /ws/bdcc_exp/sweeps/real_merge_phi_grid \
+  --compute-missing \
+  --urdf-path /ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --sample-rate-hz 50 \
+  --max-lag-sec 2.0 \
+  --lag-step-sec 0.02
+
+
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_sweep_heatmaps.py \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_phi_grid/sweep_summary_agg.csv \
+  --sweep-type phi_grid \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_phi_grid \
+  --formats png svg \
+  --annotate \
+  --annotation-fontsize 7 \
+  --palette soft_purple
