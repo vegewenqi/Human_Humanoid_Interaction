@@ -500,7 +500,9 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --annotation-fontsize 7 \
   --palette soft_purple \
   --candidate-param-rr 3.0 \
-  --candidate-param-hr 4.0
+  --candidate-param-hr 4.0 \
+  --ctr-vmin 0.0 \
+  --ctr-vmax 0.2
 
 
 =============================================================================
