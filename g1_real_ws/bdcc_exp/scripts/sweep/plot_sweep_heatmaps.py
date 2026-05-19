@@ -89,7 +89,7 @@ def get_panel_cmap(args: argparse.Namespace) -> colors.Colormap:
     if args.palette == "soft_purple":
         return colors.LinearSegmentedColormap.from_list(
             "bdcc_soft_purple",
-            ["#f7f4fb", "#e5d9f2", "#c7b7de", "#9f8bc8", "#7563a9"],
+            ["#f7f4fb", "#eae4f0", "#dcd0ed", "#cfc0ef", "#c1aeea"],
         )
     return colors.LinearSegmentedColormap.from_list(
         "bdcc_soft_blue",
