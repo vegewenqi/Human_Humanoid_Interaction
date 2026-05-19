@@ -35,6 +35,8 @@ METRICS = [
         "fmt_small": "{:.3f}",
         "fmt_large": "{:.2f}",
         "norm": "auto",
+        "vmin_arg": "clearance_vmin",
+        "vmax_arg": "clearance_vmax",
     },
     {
         "metric": "merge_safe_M_ctr",
@@ -43,6 +45,8 @@ METRICS = [
         "fmt_small": "{:.2f}",
         "fmt_large": "{:.1f}",
         "norm": "zero_min",
+        "vmin_arg": "ctr_vmin",
+        "vmax_arg": "ctr_vmax",
     },
     {
         "metric": "rmse_q0_deg",
@@ -51,6 +55,8 @@ METRICS = [
         "fmt_small": "{:.2f}",
         "fmt_large": "{:.1f}",
         "norm": "auto",
+        "vmin_arg": "rmse_vmin",
+        "vmax_arg": "rmse_vmax",
     },
     {
         "metric": "safe_ndtw_link_deg_mean",
@@ -59,6 +65,8 @@ METRICS = [
         "fmt_small": "{:.2f}",
         "fmt_large": "{:.1f}",
         "norm": "auto",
+        "vmin_arg": "ndtw_vmin",
+        "vmax_arg": "ndtw_vmax",
     },
 ]
 
@@ -176,6 +184,25 @@ def annotate_cells(
             )
 
 
+def metric_limits(
+    finite: np.ndarray,
+    spec: Dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    default_vmin: float,
+    default_vmax: float,
+) -> Tuple[float, float]:
+    vmin = getattr(args, spec.get("vmin_arg", ""), None)
+    vmax = getattr(args, spec.get("vmax_arg", ""), None)
+    if vmin is None:
+        vmin = default_vmin
+    if vmax is None:
+        vmax = default_vmax
+    if math.isclose(float(vmin), float(vmax)):
+        vmax = float(vmin) + 1e-9
+    return float(vmin), float(vmax)
+
+
 def make_norm(matrix: np.ndarray, spec: Dict[str, Any], args: argparse.Namespace) -> colors.Normalize:
     finite = matrix[np.isfinite(matrix)]
     if finite.size == 0:
@@ -183,8 +210,13 @@ def make_norm(matrix: np.ndarray, spec: Dict[str, Any], args: argparse.Namespace
 
     kind = spec.get("norm", "auto")
     if kind == "clearance":
-        vmin = args.clearance_vmin if args.clearance_vmin is not None else float(np.nanmin(finite))
-        vmax = args.clearance_vmax if args.clearance_vmax is not None else float(np.nanmax(finite))
+        vmin, vmax = metric_limits(
+            finite,
+            spec,
+            args,
+            default_vmin=float(np.nanmin(finite)),
+            default_vmax=float(np.nanmax(finite)),
+        )
         vmin = min(vmin, 0.0)
         vmax = max(vmax, 0.0)
         if math.isclose(vmin, vmax):
@@ -192,15 +224,24 @@ def make_norm(matrix: np.ndarray, spec: Dict[str, Any], args: argparse.Namespace
         return colors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
     if kind == "zero_min":
-        vmax = float(np.nanmax(finite))
+        vmin, vmax = metric_limits(
+            finite,
+            spec,
+            args,
+            default_vmin=0.0,
+            default_vmax=float(np.nanmax(finite)),
+        )
         if math.isclose(vmax, 0.0):
             vmax = 1.0
-        return colors.Normalize(vmin=0.0, vmax=vmax)
+        return colors.Normalize(vmin=vmin, vmax=vmax)
 
-    vmin = float(np.nanmin(finite))
-    vmax = float(np.nanmax(finite))
-    if math.isclose(vmin, vmax):
-        vmax = vmin + 1e-9
+    vmin, vmax = metric_limits(
+        finite,
+        spec,
+        args,
+        default_vmin=float(np.nanmin(finite)),
+        default_vmax=float(np.nanmax(finite)),
+    )
     return colors.Normalize(vmin=vmin, vmax=vmax)
 
 
@@ -305,8 +346,8 @@ def plot_heatmaps(args: argparse.Namespace, rows: List[Dict[str, str]]) -> None:
                 offset=tuple(args.marker_offset),
             )
 
-        if xs and ys and args.mark_candidate and args.sweep_type == "phi_grid":
-            cx, cy = point_indices(xs, ys, args.candidate_phi_hr, args.candidate_phi_rr)
+        if xs and ys and args.mark_candidate:
+            cx, cy = point_indices(xs, ys, args.candidate_param_hr, args.candidate_param_rr)
             scatter_marker(
                 ax,
                 cx,
@@ -397,8 +438,14 @@ def parse_args() -> argparse.Namespace:
         help="Use a separate diverging colormap for minimum clearance centered at zero.",
     )
     parser.add_argument("--clearance-cmap", default="RdBu")
-    parser.add_argument("--clearance-vmin", type=float, default=-0.04)
-    parser.add_argument("--clearance-vmax", type=float, default=0.03)
+    parser.add_argument("--clearance-vmin", type=float, default=None, help="Colorbar lower bound for clearance [m].")
+    parser.add_argument("--clearance-vmax", type=float, default=None, help="Colorbar upper bound for clearance [m].")
+    parser.add_argument("--ctr-vmin", type=float, default=None, help="Colorbar lower bound for collision-time ratio [%].")
+    parser.add_argument("--ctr-vmax", type=float, default=None, help="Colorbar upper bound for collision-time ratio [%].")
+    parser.add_argument("--rmse-vmin", type=float, default=None, help="Colorbar lower bound for RMSE q0 [deg].")
+    parser.add_argument("--rmse-vmax", type=float, default=None, help="Colorbar upper bound for RMSE q0 [deg].")
+    parser.add_argument("--ndtw-vmin", type=float, default=None, help="Colorbar lower bound for nDTW-link [deg].")
+    parser.add_argument("--ndtw-vmax", type=float, default=None, help="Colorbar upper bound for nDTW-link [deg].")
     parser.add_argument("--title-fontsize", type=float, default=9.0)
     parser.add_argument("--axis-label-fontsize", type=float, default=10.5)
     parser.add_argument("--tick-fontsize", type=float, default=9.0)
@@ -407,8 +454,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-marker-size", type=float, default=20.0)
     parser.add_argument("--baseline-marker-linewidth", type=float, default=0.7)
     parser.add_argument("--mark-candidate", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--candidate-phi-rr", type=float, default=0.01)
-    parser.add_argument("--candidate-phi-hr", type=float, default=0.15)
+    parser.add_argument("--candidate-param-rr", type=float, default=0.01)
+    parser.add_argument("--candidate-param-hr", type=float, default=0.15)
     parser.add_argument("--candidate-marker", default="*")
     parser.add_argument("--candidate-marker-size", type=float, default=52.0)
     parser.add_argument("--candidate-marker-linewidth", type=float, default=0.7)

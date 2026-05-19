@@ -444,4 +444,132 @@ python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scr
   --formats png svg \
   --annotate \
   --annotation-fontsize 7 \
-  --palette soft_purple
+  --palette soft_purple \
+  --candidate-param-rr 0.01 \
+  --candidate-param-hr 0.15 \
+  --ctr-vmin 0 \
+  --ctr-vmax 2.0
+
+
+=============================================================================
+## gamma_grid parameter sweep
+## launch参数：
+enable_self_collision: True
+enable_human_collision: True
+human_capsules_radius: same as sim
+"extrinsic_ty": 0.95,
+CBF "max_velocity": 1.0,
+g1 "max_velocity": 1.0,
+
+PHI_RR_VALUES = 0.03
+PHI_HR_VALUES = 0.15
+GAMMA_RR_VALUES = [0.5, 1.0, 2.0, 3.0, 3.5]
+GAMMA_HR_VALUES = [1.5, 2.0, 3.0, 4.0, 4.5]
+
+SCRIPT_ROOT=/ws/bdcc_exp/scripts/sweep
+python3 $SCRIPT_ROOT/run_parameter_sweep.py \
+  --platform real \
+  --sweep-type gamma_grid \
+  --out-root /ws/bdcc_exp/sweeps/real_merge_gamma_grid \
+  --repeats 3 \
+  --launch-wait-sec 3 \
+  --shutdown-wait-sec 10 \
+  --duration 70 \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --rviz true
+
+
+python3 /ws/bdcc_exp/scripts/sweep/aggregate_sweep_results.py \
+  --sweep-root /ws/bdcc_exp/sweeps/real_merge_gamma_grid \
+  --compute-missing \
+  --urdf-path /ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --sample-rate-hz 50 \
+  --max-lag-sec 2.0 \
+  --lag-step-sec 0.02
+
+
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_sweep_heatmaps.py \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_gamma_grid/sweep_summary_agg.csv \
+  --sweep-type gamma_grid \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_gamma_grid \
+  --formats png svg \
+  --annotate \
+  --annotation-fontsize 7 \
+  --palette soft_purple \
+  --candidate-param-rr 3.0 \
+  --candidate-param-hr 4.0
+
+
+=============================================================================
+## pareto parameter sweep
+## launch参数：
+enable_self_collision: True
+enable_human_collision: True
+human_capsules_radius: same as sim
+"extrinsic_ty": 0.95,
+CBF "max_velocity": 1.0,
+g1 "max_velocity": 1.0,
+
+PARETO_CANDIDATES = [
+    (0.005, 0.09, 0.5, 1.5),
+    (0.01, 0.12, 1.0, 2.0),
+    (0.02, 0.15, 2.0, 3.0),
+    (0.03, 0.15, 2.0, 3.0),
+    (0.04, 0.19, 3.5, 4.5),
+    (0.04, 0.17, 2.0, 3.0),
+    (0.03, 0.19, 2.0, 4.5),
+    (0.005, 0.19, 0.5, 4.5),
+    (0.04, 0.09, 3.5, 1.5),
+    (0.02, 0.17, 3.0, 4.0),
+]
+
+SCRIPT_ROOT=/ws/bdcc_exp/scripts/sweep
+python3 $SCRIPT_ROOT/run_parameter_sweep.py \
+  --platform real \
+  --sweep-type pareto_samples \
+  --out-root /ws/bdcc_exp/sweeps/real_merge_pareto_samples \
+  --repeats 3 \
+  --launch-wait-sec 3 \
+  --shutdown-wait-sec 10 \
+  --duration 70 \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --rviz true
+
+
+python3 /ws/bdcc_exp/scripts/sweep/aggregate_sweep_results.py \
+  --sweep-root /ws/bdcc_exp/sweeps/real_merge_pareto_samples \
+  --compute-missing \
+  --urdf-path /ws/src/g1_cbf_ros2/g1_description/urdf/g1_29dof.urdf \
+  --eval-start-sec 10 \
+  --eval-end-sec 62 \
+  --sample-rate-hz 50 \
+  --max-lag-sec 2.0 \
+  --lag-step-sec 0.02
+
+
+# 画 composite Pareto
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_pareto_tradeoff.py \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_phi_grid/sweep_summary_agg.csv \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_gamma_grid/sweep_summary_agg.csv \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_pareto_samples/sweep_summary_agg.csv \
+  --pareto-mode composite \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_pareto \
+  --formats png svg pdf \
+  --show-errorbars \
+  --mark-baseline
+
+
+# 画 raw Pareto
+python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_pareto_tradeoff.py \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_phi_grid/sweep_summary_agg.csv \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_gamma_grid/sweep_summary_agg.csv \
+  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_pareto_samples/sweep_summary_agg.csv \
+  --pareto-mode raw \
+  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_pareto \
+  --formats png svg pdf \
+  --show-errorbars \
+  --mark-baseline
