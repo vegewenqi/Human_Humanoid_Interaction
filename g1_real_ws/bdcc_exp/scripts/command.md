@@ -526,6 +526,17 @@ PARETO_CANDIDATES = [
     (0.005, 0.19, 0.5, 4.5),
     (0.04, 0.09, 3.5, 1.5),
     (0.02, 0.17, 3.0, 4.0),
+    (0.010, 0.135, 2.0, 3.0),
+    (0.020, 0.135, 2.0, 3.0),
+    (0.030, 0.135, 2.0, 3.0),
+    (0.020, 0.145, 2.0, 3.0),
+    (0.030, 0.145, 2.0, 3.0),
+    (0.010, 0.150, 3.0, 4.0),
+    (0.020, 0.150, 3.0, 4.0),
+    (0.015, 0.150, 2.0, 3.0),
+    (0.015, 0.170, 2.0, 3.0),
+    (0.030, 0.170, 3.0, 4.0),
+
 ]
 
 SCRIPT_ROOT=/ws/bdcc_exp/scripts/sweep
@@ -555,23 +566,7 @@ python3 /ws/bdcc_exp/scripts/sweep/aggregate_sweep_results.py \
 
 # 画 composite Pareto
 python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_pareto_tradeoff.py \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_phi_grid/sweep_summary_agg.csv \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_gamma_grid/sweep_summary_agg.csv \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_pareto_samples/sweep_summary_agg.csv \
+  --sweep-root /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps \
   --pareto-mode composite \
   --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_pareto \
-  --formats png svg pdf \
-  --show-errorbars \
-  --mark-baseline
-
-
-# 画 raw Pareto
-python3 /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/scripts/sweep/plot_pareto_tradeoff.py \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_phi_grid/sweep_summary_agg.csv \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_gamma_grid/sweep_summary_agg.csv \
-  --summary-csv /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/sweeps/real_merge_pareto_samples/sweep_summary_agg.csv \
-  --pareto-mode raw \
-  --outdir /home/wc3059/Projects/Human_Humanoid_Interaction/g1_real_ws/bdcc_exp/figures/sweeps/real_merge_pareto \
-  --formats png svg pdf \
-  --show-errorbars \
-  --mark-baseline
+  --formats png svg
