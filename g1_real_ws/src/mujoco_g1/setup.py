@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 from glob import glob
 import os
 
@@ -7,7 +7,7 @@ package_name = 'mujoco_g1'
 setup(
     name=package_name,
     version='0.0.1',
-    packages=[package_name],
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
         ['resource/' + package_name]),
@@ -30,6 +30,7 @@ setup(
             'human_skeleton_capsule = mujoco_g1.human_skeleton_capsule:main',
             'human_capsule_frame_transform = mujoco_g1.human_capsule_frame_transform:main',
             'zed_skeleton_points_preprocessor = mujoco_g1.zed_skeleton_points_preprocessor:main',
+            'zed_hand_finger_angles = mujoco_g1.zed_hand_finger_angles:main',
         ],
     },
 )
