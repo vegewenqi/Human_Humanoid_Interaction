@@ -8,6 +8,7 @@ from launch.substitutions import (
     PythonExpression,
 )
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -38,6 +39,16 @@ def generate_launch_description():
     real_safe_joint_command_topic = LaunchConfiguration("real_safe_joint_command_topic")
     real_safe_qdes_topic = LaunchConfiguration("real_safe_qdes_topic")
     real_human_capsule_topic = LaunchConfiguration("real_human_capsule_topic")
+
+    # -------- real hand topics / params --------
+    run_inspire_hand = LaunchConfiguration("run_inspire_hand")
+    enable_inspire_hand_motion = LaunchConfiguration("enable_inspire_hand_motion")
+    hand_finger_angles_topic = LaunchConfiguration("hand_finger_angles_topic")
+    inspire_hand_output_layout = LaunchConfiguration("inspire_hand_output_layout")
+    inspire_hand_command_topic = LaunchConfiguration("inspire_hand_command_topic")
+    inspire_hand_state_topic = LaunchConfiguration("inspire_hand_state_topic")
+    inspire_hand_controlled_side = LaunchConfiguration("inspire_hand_controlled_side")
+    inspire_hand_shutdown_home_hold_sec = LaunchConfiguration("inspire_hand_shutdown_home_hold_sec")
 
     # -------- ghost topic --------
     ghost_joint_state_topic = LaunchConfiguration("ghost_joint_state_topic")
@@ -139,6 +150,9 @@ def generate_launch_description():
     rviz_cond_real = IfCondition(
         PythonExpression(["'", rviz, "' == 'true' and '", use_cbf, "' == 'true' and '", run_real, "' == 'true'"])
     )
+    inspire_hand_cond = IfCondition(
+        PythonExpression(["'", run_real, "' == 'true' and '", run_inspire_hand, "' == 'true'"])
+    )
 
     return LaunchDescription([
         # ---------------- launch args ----------------
@@ -169,6 +183,15 @@ def generate_launch_description():
         DeclareLaunchArgument("real_safe_joint_command_topic", default_value="/real/joint_commands"),
         DeclareLaunchArgument("real_safe_qdes_topic", default_value="/real/g1_upperbody_q_des_safe"),
         DeclareLaunchArgument("real_human_capsule_topic", default_value="/real/human_capsules_robot"),
+
+        DeclareLaunchArgument("run_inspire_hand", default_value="true"),
+        DeclareLaunchArgument("enable_inspire_hand_motion", default_value="true"),
+        DeclareLaunchArgument("hand_finger_angles_topic", default_value="/hand_finger_angles"),
+        DeclareLaunchArgument("inspire_hand_output_layout", default_value="finger10"),
+        DeclareLaunchArgument("inspire_hand_command_topic", default_value="/inspire/cmd"),
+        DeclareLaunchArgument("inspire_hand_state_topic", default_value="/inspire/state"),
+        DeclareLaunchArgument("inspire_hand_controlled_side", default_value="both"),
+        DeclareLaunchArgument("inspire_hand_shutdown_home_hold_sec", default_value="0.5"),
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
@@ -228,6 +251,25 @@ def generate_launch_description():
                 "point_ema_alpha": 0.30,
                 "point_max_jump": 0.6,
                 "point_max_reject_count": 3,
+            }],
+        ),
+
+        Node(
+            package="mujoco_g1",
+            executable="zed_hand_finger_angles",
+            name="zed_hand_finger_angles",
+            output="screen",
+            condition=inspire_hand_cond,
+            parameters=[{
+                "input_points_topic": skeleton_points_filtered_topic,
+                "input_conf_topic": "/skeleton/confidence",
+                "output_topic": hand_finger_angles_topic,
+                "output_layout": inspire_hand_output_layout,
+                "min_confidence": 40,
+                "timeout_state": 1.0,
+                "hold_last_on_timeout": True,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
             }],
         ),
 
@@ -531,6 +573,31 @@ def generate_launch_description():
         # ============================================================
         # REAL ROBOT PATH
         # ============================================================
+
+        Node(
+            package="real_g1",
+            executable="inspire_hand_bridge",
+            name="inspire_hand_bridge",
+            output="screen",
+            condition=inspire_hand_cond,
+            parameters=[{
+                "finger_angles_topic": hand_finger_angles_topic,
+                "command_topic": inspire_hand_command_topic,
+                "state_topic": inspire_hand_state_topic,
+                "controlled_side": inspire_hand_controlled_side,
+                "enable_motion": ParameterValue(enable_inspire_hand_motion, value_type=bool),
+                "input_layout": inspire_hand_output_layout,
+                "hand_home_q": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "shutdown_home_hold_sec": ParameterValue(
+                    inspire_hand_shutdown_home_hold_sec,
+                    value_type=float,
+                ),
+                "publish_both_hands": True,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
+            }],
+        ),
 
         # ---- real nominal ----
         Node(
