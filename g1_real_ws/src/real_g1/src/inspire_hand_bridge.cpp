@@ -18,10 +18,13 @@
 // holds the last valid command.
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -127,6 +130,8 @@ public:
     declare_parameter<bool>("publish_both_hands", true);
     declare_parameter<bool>("publish_state", false);
     declare_parameter<double>("command_timeout_sec", 0.5);
+    declare_parameter<std::vector<double>>("hand_home_q", std::vector<double>(kTotal, kFistQ));
+    declare_parameter<double>("shutdown_home_hold_sec", 0.5);
     declare_parameter<bool>("debug_log", false);
     declare_parameter<double>("debug_log_period_sec", 1.0);
 
@@ -140,12 +145,15 @@ public:
     publish_both_hands_ = get_parameter("publish_both_hands").as_bool();
     publish_state_ = get_parameter("publish_state").as_bool();
     command_timeout_sec_ = get_parameter("command_timeout_sec").as_double();
+    const auto hand_home_q_param = get_parameter("hand_home_q").as_double_array();
+    shutdown_home_hold_sec_ = get_parameter("shutdown_home_hold_sec").as_double();
     debug_log_ = get_parameter("debug_log").as_bool();
     debug_log_period_sec_ = get_parameter("debug_log_period_sec").as_double();
 
+    load_hand_home_q(hand_home_q_param);
     validate_parameters();
 
-    q_.fill(kFistQ);
+    q_ = hand_home_q_;
     last_cmd_time_ = now();
 
     auto dds_qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
@@ -180,6 +188,7 @@ public:
       "  controlled_side: %s\n"
       "  enable_motion  : %s\n"
       "  startup target : fist\n"
+      "  shutdown target: hand_home_q\n"
       "  timeout policy : hold last valid command\n"
       "  value convention: /hand_finger_angles 1.0=open, 0.0=fist; q 1.0=open, 0.0=close",
       finger_angles_topic_.c_str(),
@@ -203,7 +212,41 @@ public:
     }
   }
 
+  void RequestSafeStop()
+  {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    if (shutdown_requested_) {
+      return;
+    }
+
+    shutdown_requested_ = true;
+    shutdown_done_ = false;
+    shutdown_started_ = false;
+    RCLCPP_WARN(get_logger(), "Ctrl-C detected. Sending hand_home_q before shutdown.");
+  }
+
+  bool SafeStopDone() const
+  {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    return shutdown_done_;
+  }
+
 private:
+  void load_hand_home_q(const std::vector<double> & values)
+  {
+    if (values.size() != kTotal) {
+      throw std::runtime_error("hand_home_q must have length 12");
+    }
+
+    for (size_t i = 0; i < kTotal; ++i) {
+      const float value = static_cast<float>(values[i]);
+      if (!valid_open_amount(value)) {
+        throw std::runtime_error("hand_home_q entries must be finite values in [0, 1]");
+      }
+      hand_home_q_[i] = value;
+    }
+  }
+
   void validate_parameters()
   {
     if (
@@ -215,6 +258,9 @@ private:
     }
     if (command_timeout_sec_ <= 0.0) {
       throw std::runtime_error("command_timeout_sec must be > 0");
+    }
+    if (shutdown_home_hold_sec_ < 0.0) {
+      throw std::runtime_error("shutdown_home_hold_sec must be >= 0");
     }
     if (debug_log_period_sec_ <= 0.0) {
       throw std::runtime_error("debug_log_period_sec must be > 0");
@@ -366,6 +412,10 @@ private:
 
   void on_finger_angles(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
   {
+    if (ShutdownRequested()) {
+      return;
+    }
+
     std::array<float, kTotal> parsed_q{};
     std::string used_layout;
     if (!parse_input(msg->data, parsed_q, used_layout)) {
@@ -412,6 +462,11 @@ private:
 
   void on_timer()
   {
+    if (ShutdownRequested()) {
+      run_shutdown_home();
+      return;
+    }
+
     const double dt = (now() - last_cmd_time_).seconds();
     if (dt <= command_timeout_sec_ || idle_) {
       return;
@@ -439,6 +494,41 @@ private:
       msg->states.size());
   }
 
+  bool ShutdownRequested() const
+  {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    return shutdown_requested_;
+  }
+
+  void MarkSafeStopDone()
+  {
+    std::lock_guard<std::mutex> guard(shutdown_mtx_);
+    shutdown_done_ = true;
+    shutdown_requested_ = false;
+  }
+
+  void run_shutdown_home()
+  {
+    if (!shutdown_started_) {
+      shutdown_started_ = true;
+      shutdown_start_time_ = now();
+      q_ = hand_home_q_;
+      if (enable_motion_) {
+        publish_command();
+      }
+    }
+
+    q_ = hand_home_q_;
+    if (enable_motion_) {
+      publish_command();
+    }
+
+    if ((now() - shutdown_start_time_).seconds() >= shutdown_home_hold_sec_) {
+      RCLCPP_WARN(get_logger(), "Hand shutdown home complete.");
+      MarkSafeStopDone();
+    }
+  }
+
   std::string finger_angles_topic_;
   std::string command_topic_;
   std::string state_topic_;
@@ -449,12 +539,19 @@ private:
   bool publish_both_hands_{true};
   bool publish_state_{false};
   double command_timeout_sec_{0.5};
+  double shutdown_home_hold_sec_{0.5};
   bool debug_log_{false};
   double debug_log_period_sec_{1.0};
 
   std::array<float, kTotal> q_{};
+  std::array<float, kTotal> hand_home_q_{};
   rclcpp::Time last_cmd_time_;
+  rclcpp::Time shutdown_start_time_;
   bool idle_{false};
+  mutable std::mutex shutdown_mtx_;
+  bool shutdown_requested_{false};
+  bool shutdown_done_{false};
+  bool shutdown_started_{false};
 
   rclcpp::Publisher<unitree_go::msg::MotorCmds>::SharedPtr command_pub_;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr finger_angles_sub_;
@@ -464,8 +561,36 @@ private:
 
 int main(int argc, char ** argv)
 {
-  rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<InspireHandBridge>());
+  rclcpp::InitOptions init_options;
+  init_options.shutdown_on_signal = false;
+  rclcpp::init(argc, argv, init_options);
+
+  static std::atomic<bool> g_shutdown_requested{false};
+  std::signal(SIGINT, [](int) { g_shutdown_requested.store(true); });
+  std::signal(SIGTERM, [](int) { g_shutdown_requested.store(true); });
+
+  auto node = std::make_shared<InspireHandBridge>();
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  bool safe_stop_requested = false;
+  while (rclcpp::ok()) {
+    executor.spin_some();
+
+    if (g_shutdown_requested.load() && !safe_stop_requested) {
+      node->RequestSafeStop();
+      safe_stop_requested = true;
+    }
+
+    if (safe_stop_requested && node->SafeStopDone()) {
+      break;
+    }
+
+    rclcpp::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  executor.cancel();
+  executor.remove_node(node);
   rclcpp::shutdown();
   return 0;
 }
