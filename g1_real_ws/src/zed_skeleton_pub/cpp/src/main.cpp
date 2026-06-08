@@ -6,6 +6,7 @@
 #include <opencv2/opencv.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <numeric>
 
 #include "rclcpp/rclcpp.hpp"
@@ -57,9 +58,15 @@ int main(int argc, char **argv)
     auto pub_orient = node->create_publisher<std_msgs::msg::Float32MultiArray>("/skeleton/local_orientations", 10);
     const bool publish_left_image = node->declare_parameter<bool>("publish_left_image", true);
     const std::string image_topic = node->declare_parameter<std::string>("image_topic", "/image/compressed");
-    const int image_publish_every_n = std::max(1, node->declare_parameter<int>("image_publish_every_n", 2));
-    const int image_publish_width = std::max(160, node->declare_parameter<int>("image_publish_width", 640));
-    const int image_jpeg_quality = std::max(1, std::min(100, node->declare_parameter<int>("image_jpeg_quality", 80)));
+    const int image_publish_every_n_param =
+        static_cast<int>(node->declare_parameter<int64_t>("image_publish_every_n", 2));
+    const int image_publish_width_param =
+        static_cast<int>(node->declare_parameter<int64_t>("image_publish_width", 640));
+    const int image_jpeg_quality_param =
+        static_cast<int>(node->declare_parameter<int64_t>("image_jpeg_quality", 80));
+    const int image_publish_every_n = std::max(1, image_publish_every_n_param);
+    const int image_publish_width = std::max(160, image_publish_width_param);
+    const int image_jpeg_quality = std::max(1, std::min(100, image_jpeg_quality_param));
     auto pub_left_image = node->create_publisher<sensor_msgs::msg::CompressedImage>(image_topic, 5);
     // RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence, /skeleton/local_orientations");
     std::string published_topics = "/skeleton/points, /skeleton/confidence";
