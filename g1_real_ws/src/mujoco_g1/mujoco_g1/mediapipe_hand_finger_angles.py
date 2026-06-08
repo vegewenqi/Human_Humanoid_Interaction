@@ -268,6 +268,8 @@ class MediaPipeHandFingerAnglesNode(Node):
         self.declare_parameter("startup_open_amount", 0.0)
         self.declare_parameter("hold_last_on_no_detection", True)
         self.declare_parameter("ring_follows_middle", False)
+        self.declare_parameter("ema_alpha", 0.35)
+        self.declare_parameter("max_delta_per_update", 0.08)
 
         defaults = {
             "index": (19.0, 120.0),
@@ -294,6 +296,8 @@ class MediaPipeHandFingerAnglesNode(Node):
         self.startup_open_amount = float(self.get_parameter("startup_open_amount").value)
         self.hold_last_on_no_detection = bool(self.get_parameter("hold_last_on_no_detection").value)
         self.ring_follows_middle = bool(self.get_parameter("ring_follows_middle").value)
+        self.ema_alpha = float(self.get_parameter("ema_alpha").value)
+        self.max_delta_per_update = float(self.get_parameter("max_delta_per_update").value)
 
         self._validate_params()
         self._finger_configs = self._make_finger_configs()
@@ -343,6 +347,10 @@ class MediaPipeHandFingerAnglesNode(Node):
             raise ValueError("startup_open_amount must be in [0, 1]")
         if self.debug_log_period_sec <= 0.0:
             raise ValueError("debug_log_period_sec must be > 0")
+        if not (0.0 <= self.ema_alpha <= 1.0):
+            raise ValueError("ema_alpha must be in [0, 1]")
+        if self.max_delta_per_update < 0.0:
+            raise ValueError("max_delta_per_update must be >= 0")
 
     def _make_image_qos(self) -> QoSProfile:
         if not self.reliable_image_qos:
@@ -409,6 +417,20 @@ class MediaPipeHandFingerAnglesNode(Node):
             float(np.clip(pinky, 0.0, 1.0)),
         ]
 
+    def _filter_open6(self, previous: List[float], raw: List[float]) -> List[float]:
+        filtered: List[float] = []
+        for prev, target in zip(previous, raw):
+            smoothed = (1.0 - self.ema_alpha) * prev + self.ema_alpha * target
+            if self.max_delta_per_update > 0.0:
+                delta = float(np.clip(
+                    smoothed - prev,
+                    -self.max_delta_per_update,
+                    self.max_delta_per_update,
+                ))
+                smoothed = prev + delta
+            filtered.append(float(np.clip(smoothed, 0.0, 1.0)))
+        return filtered
+
     @staticmethod
     def _finger5_from_open6(open6: List[float]) -> List[float]:
         thumb = min(open6[0], open6[1])
@@ -444,11 +466,13 @@ class MediaPipeHandFingerAnglesNode(Node):
                 self._finger_configs,
                 warn_cb=lambda text: self.get_logger().warn(text, throttle_duration_sec=2.0),
             )
-            open6 = self._open6_from_angles(angles)
+            raw_open6 = self._open6_from_angles(angles)
             if handedness == "Left":
-                self.left6 = open6
+                self.left6 = self._filter_open6(self.left6, raw_open6)
+                open6 = self.left6
             else:
-                self.right6 = open6
+                self.right6 = self._filter_open6(self.right6, raw_open6)
+                open6 = self.right6
             angle_debug.append(
                 f"{handedness}: "
                 f"tb={open6[0]:.2f} tr={open6[1]:.2f} "

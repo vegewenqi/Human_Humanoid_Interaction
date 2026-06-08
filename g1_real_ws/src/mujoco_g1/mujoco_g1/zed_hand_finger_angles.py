@@ -66,7 +66,7 @@ class ZedHandFingerAnglesNode(Node):
         self.declare_parameter("output_topic", "/hand_finger_angles")
 
         self.declare_parameter("min_confidence", 40)
-        self.declare_parameter("min_valid_hand_points", 3)
+        self.declare_parameter("min_valid_hand_points", 1)
         self.declare_parameter("min_scale_m", 0.05)
         self.declare_parameter("fallback_scale_m", 0.25)
 
@@ -165,8 +165,8 @@ class ZedHandFingerAnglesNode(Node):
         )
 
     def _validate_params(self):
-        if self.min_valid_hand_points < 2:
-            raise ValueError("min_valid_hand_points must be >= 2")
+        if self.min_valid_hand_points < 1:
+            raise ValueError("min_valid_hand_points must be >= 1")
         if self.fallback_scale_m <= 0.0:
             raise ValueError("fallback_scale_m must be > 0")
         if not (0.0 <= self.closure_ema_alpha <= 1.0):

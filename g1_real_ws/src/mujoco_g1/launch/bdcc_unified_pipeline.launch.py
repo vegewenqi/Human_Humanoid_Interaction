@@ -204,7 +204,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument("run_inspire_hand", default_value="true"),
         DeclareLaunchArgument("enable_inspire_hand_motion", default_value="true"),
-        DeclareLaunchArgument("inspire_hand_source", default_value="mediapipe"),
+        DeclareLaunchArgument("inspire_hand_source", default_value="zed_skeleton"),
         DeclareLaunchArgument("inspire_hand_image_topic", default_value="/image/compressed"),
         DeclareLaunchArgument("inspire_hand_compressed_image", default_value="true"),
         DeclareLaunchArgument("hand_finger_angles_topic", default_value="/hand_finger_angles"),
@@ -725,7 +725,7 @@ def generate_launch_description():
                     "obstacle_topic": "/real/bbox_3d",
                     "collision_geometry": "capsules",
                     "K": 30.0,
-                    "max_velocity": 1.0,
+                    "max_velocity": 0.5,
                     "lpf_gain": 0.5,
                     "dt": 1.0/25.0,
                     "rr_safety_distance": real_rr_safety_distance,
@@ -735,7 +735,7 @@ def generate_launch_description():
 
                     # "use_gpu": True,
                     "enable_self_collision": True,
-                    "enable_human_collision": True,
+                    "enable_human_collision": False,
 
                     "enable_robot_caps_viz": False,
                     "enable_distance_viz": False,
@@ -781,7 +781,7 @@ def generate_launch_description():
 
                 "control_dt": 0.01,
                 "ema_alpha": 0.5,
-                "max_joint_velocity": 1.0,
+                "max_joint_velocity": 0.5,
                 # "topic_timeout_sec": 0.30,
                 "home_transition_velocity": 0.20,
                 "shutdown_return_velocity": 0.20,
