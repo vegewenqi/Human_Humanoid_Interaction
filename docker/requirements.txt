@@ -1,5 +1,6 @@
-numpy
+numpy==1.26.4
 scipy
 mujoco
 jax
 pin
+mediapipe==0.10.14

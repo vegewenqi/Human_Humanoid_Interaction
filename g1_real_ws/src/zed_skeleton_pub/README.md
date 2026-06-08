@@ -19,3 +19,23 @@ sudo apt install -y libopencv-dev freeglut3-dev libglew-dev libgl1-mesa-dev libg
 # Install all of the dependencies for Python implementation
 pip install -r requirements.txt
 ```
+
+## ROS 2 topics
+
+`zed_skeleton_pub_node` publishes the body skeleton topics and, by default, a
+compressed left camera image for MediaPipe hand perception:
+
+- `/skeleton/points`
+- `/skeleton/confidence`
+- `/image/compressed`
+
+Useful image parameters:
+
+```bash
+ros2 run zed_skeleton_pub zed_skeleton_pub_node --ros-args \
+  -p publish_left_image:=true \
+  -p image_topic:=/image/compressed \
+  -p image_publish_every_n:=2 \
+  -p image_publish_width:=640 \
+  -p image_jpeg_quality:=80
+```

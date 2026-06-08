@@ -43,12 +43,16 @@ def generate_launch_description():
     # -------- real hand topics / params --------
     run_inspire_hand = LaunchConfiguration("run_inspire_hand")
     enable_inspire_hand_motion = LaunchConfiguration("enable_inspire_hand_motion")
+    inspire_hand_source = LaunchConfiguration("inspire_hand_source")
+    inspire_hand_image_topic = LaunchConfiguration("inspire_hand_image_topic")
+    inspire_hand_compressed_image = LaunchConfiguration("inspire_hand_compressed_image")
     hand_finger_angles_topic = LaunchConfiguration("hand_finger_angles_topic")
     inspire_hand_output_layout = LaunchConfiguration("inspire_hand_output_layout")
     inspire_hand_command_topic = LaunchConfiguration("inspire_hand_command_topic")
     inspire_hand_state_topic = LaunchConfiguration("inspire_hand_state_topic")
     inspire_hand_controlled_side = LaunchConfiguration("inspire_hand_controlled_side")
     inspire_hand_shutdown_home_hold_sec = LaunchConfiguration("inspire_hand_shutdown_home_hold_sec")
+    inspire_hand_publish_debug_image = LaunchConfiguration("inspire_hand_publish_debug_image")
 
     # -------- ghost topic --------
     ghost_joint_state_topic = LaunchConfiguration("ghost_joint_state_topic")
@@ -153,6 +157,20 @@ def generate_launch_description():
     inspire_hand_cond = IfCondition(
         PythonExpression(["'", run_real, "' == 'true' and '", run_inspire_hand, "' == 'true'"])
     )
+    inspire_zed_hand_cond = IfCondition(
+        PythonExpression([
+            "'", run_real, "' == 'true' and '",
+            run_inspire_hand, "' == 'true' and '",
+            inspire_hand_source, "' == 'zed_skeleton'"
+        ])
+    )
+    inspire_mediapipe_hand_cond = IfCondition(
+        PythonExpression([
+            "'", run_real, "' == 'true' and '",
+            run_inspire_hand, "' == 'true' and '",
+            inspire_hand_source, "' == 'mediapipe'"
+        ])
+    )
 
     return LaunchDescription([
         # ---------------- launch args ----------------
@@ -186,12 +204,16 @@ def generate_launch_description():
 
         DeclareLaunchArgument("run_inspire_hand", default_value="true"),
         DeclareLaunchArgument("enable_inspire_hand_motion", default_value="true"),
+        DeclareLaunchArgument("inspire_hand_source", default_value="mediapipe"),
+        DeclareLaunchArgument("inspire_hand_image_topic", default_value="/image/compressed"),
+        DeclareLaunchArgument("inspire_hand_compressed_image", default_value="true"),
         DeclareLaunchArgument("hand_finger_angles_topic", default_value="/hand_finger_angles"),
-        DeclareLaunchArgument("inspire_hand_output_layout", default_value="finger10"),
+        DeclareLaunchArgument("inspire_hand_output_layout", default_value="finger12"),
         DeclareLaunchArgument("inspire_hand_command_topic", default_value="/inspire/cmd"),
         DeclareLaunchArgument("inspire_hand_state_topic", default_value="/inspire/state"),
         DeclareLaunchArgument("inspire_hand_controlled_side", default_value="both"),
         DeclareLaunchArgument("inspire_hand_shutdown_home_hold_sec", default_value="0.5"),
+        DeclareLaunchArgument("inspire_hand_publish_debug_image", default_value="false"),
 
         DeclareLaunchArgument("ghost_joint_state_topic", default_value="/ghost/joint_states"),
 
@@ -259,7 +281,7 @@ def generate_launch_description():
             executable="zed_hand_finger_angles",
             name="zed_hand_finger_angles",
             output="screen",
-            condition=inspire_hand_cond,
+            condition=inspire_zed_hand_cond,
             parameters=[{
                 "input_points_topic": skeleton_points_filtered_topic,
                 "input_conf_topic": "/skeleton/confidence",
@@ -268,6 +290,28 @@ def generate_launch_description():
                 "min_confidence": 40,
                 "timeout_state": 1.0,
                 "hold_last_on_timeout": True,
+                "debug_log": False,
+                "debug_log_period_sec": 1.0,
+            }],
+        ),
+
+        Node(
+            package="mujoco_g1",
+            executable="mediapipe_hand_finger_angles",
+            name="mediapipe_hand_finger_angles",
+            output="screen",
+            condition=inspire_mediapipe_hand_cond,
+            parameters=[{
+                "image_topic": inspire_hand_image_topic,
+                "compressed_image": ParameterValue(inspire_hand_compressed_image, value_type=bool),
+                "output_topic": hand_finger_angles_topic,
+                "output_layout": inspire_hand_output_layout,
+                "startup_open_amount": 0.0,
+                "hold_last_on_no_detection": True,
+                "publish_debug_image": ParameterValue(
+                    inspire_hand_publish_debug_image,
+                    value_type=bool,
+                ),
                 "debug_log": False,
                 "debug_log_period_sec": 1.0,
             }],

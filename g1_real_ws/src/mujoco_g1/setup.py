@@ -31,6 +31,7 @@ setup(
             'human_capsule_frame_transform = mujoco_g1.human_capsule_frame_transform:main',
             'zed_skeleton_points_preprocessor = mujoco_g1.zed_skeleton_points_preprocessor:main',
             'zed_hand_finger_angles = mujoco_g1.zed_hand_finger_angles:main',
+            'mediapipe_hand_finger_angles = mujoco_g1.mediapipe_hand_finger_angles:main',
         ],
     },
 )

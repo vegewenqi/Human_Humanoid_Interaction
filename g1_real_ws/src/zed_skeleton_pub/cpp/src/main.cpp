@@ -4,10 +4,12 @@
 #include "TrackingViewer.hpp"
 
 #include <opencv2/opencv.hpp>
+#include <algorithm>
 #include <chrono>
 #include <numeric>
 
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/compressed_image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "std_msgs/msg/u_int8.hpp"
@@ -53,8 +55,19 @@ int main(int argc, char **argv)
     auto pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("/skeleton/points", 10);
     auto pub_conf  = node->create_publisher<std_msgs::msg::UInt8>("/skeleton/confidence", 10);
     auto pub_orient = node->create_publisher<std_msgs::msg::Float32MultiArray>("/skeleton/local_orientations", 10);
+    const bool publish_left_image = node->declare_parameter<bool>("publish_left_image", true);
+    const std::string image_topic = node->declare_parameter<std::string>("image_topic", "/image/compressed");
+    const int image_publish_every_n = std::max(1, node->declare_parameter<int>("image_publish_every_n", 2));
+    const int image_publish_width = std::max(160, node->declare_parameter<int>("image_publish_width", 640));
+    const int image_jpeg_quality = std::max(1, std::min(100, node->declare_parameter<int>("image_jpeg_quality", 80)));
+    auto pub_left_image = node->create_publisher<sensor_msgs::msg::CompressedImage>(image_topic, 5);
     // RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence, /skeleton/local_orientations");
-    RCLCPP_INFO(node->get_logger(), "Publishing /skeleton/points, /skeleton/confidence");
+    std::string published_topics = "/skeleton/points, /skeleton/confidence";
+    if (publish_left_image)
+    {
+        published_topics += ", " + image_topic;
+    }
+    RCLCPP_INFO(node->get_logger(), "Publishing %s", published_topics.c_str());
 
     PositionalTrackingParameters positional_tracking_parameters;
     positional_tracking_parameters.set_as_static = true;
@@ -91,12 +104,26 @@ int main(int argc, char **argv)
     float image_aspect_ratio = camera_config.resolution.width / (1.f * camera_config.resolution.height);
     int requested_low_res_w = min(1280, (int)camera_config.resolution.width);
     sl::Resolution display_resolution(requested_low_res_w, requested_low_res_w / image_aspect_ratio);
+    const int requested_image_w = std::min(image_publish_width, (int)camera_config.resolution.width);
+    sl::Resolution image_publish_resolution(
+        requested_image_w,
+        std::max(1, (int)(requested_image_w / image_aspect_ratio)));
 
     cv::Mat image_left_ocv(display_resolution.height, display_resolution.width, CV_8UC4, 1);
     Mat image_left(display_resolution, MAT_TYPE::U8_C4, image_left_ocv.data, image_left_ocv.step);
+    cv::Mat image_publish_ocv(image_publish_resolution.height, image_publish_resolution.width, CV_8UC4, 1);
+    Mat image_publish_left(
+        image_publish_resolution,
+        MAT_TYPE::U8_C4,
+        image_publish_ocv.data,
+        image_publish_ocv.step);
     sl::float2 img_scale(
         display_resolution.width / (float)camera_config.resolution.width,
         display_resolution.height / (float)camera_config.resolution.height);
+    std::vector<int> jpeg_encode_params = {
+        cv::IMWRITE_JPEG_QUALITY,
+        image_jpeg_quality,
+    };
 
     GLViewer viewer;
     if (show_3d_viewer)
@@ -135,6 +162,31 @@ int main(int argc, char **argv)
 
             // get skeleton every frame
             zed.retrieveBodies(bodies, body_tracker_parameters_rt);
+
+            if (publish_left_image && frame_id % image_publish_every_n == 0)
+            {
+                zed.retrieveImage(image_publish_left, VIEW::LEFT, MEM::CPU, image_publish_resolution);
+
+                cv::Mat image_publish_bgr;
+                cv::cvtColor(image_publish_ocv, image_publish_bgr, cv::COLOR_BGRA2BGR);
+
+                sensor_msgs::msg::CompressedImage image_msg;
+                image_msg.header.stamp = node->get_clock()->now();
+                image_msg.header.frame_id = "zed_left_camera";
+                image_msg.format = "jpeg";
+                if (cv::imencode(".jpg", image_publish_bgr, image_msg.data, jpeg_encode_params))
+                {
+                    pub_left_image->publish(image_msg);
+                }
+                else
+                {
+                    RCLCPP_WARN_THROTTLE(
+                        node->get_logger(),
+                        *node->get_clock(),
+                        2000,
+                        "Failed to JPEG-encode ZED left image");
+                }
+            }
 
             int best_idx = selectBestBodyIndex(bodies);
 
@@ -352,6 +404,7 @@ int main(int argc, char **argv)
         viewer.exit();
     }
     image_left.free();
+    image_publish_left.free();
     bodies.body_list.clear();
     zed.disableBodyTracking();
     zed.disablePositionalTracking();
