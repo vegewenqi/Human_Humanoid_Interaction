@@ -1373,7 +1373,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parameter-note-fontsize", type=float, default=9.0)
     parser.add_argument("--mark-failure-sample", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--failure-marker", default="o")
-    parser.add_argument("--failure-size", type=float, default=160.0)
+    parser.add_argument("--failure-size", type=float, default=70.0)
     parser.add_argument("--failure-linewidth", type=float, default=1.0)
     parser.add_argument("--failure-label", default="Failure-regime point")
     parser.add_argument("--annotate-failure-sample", action="store_true")
